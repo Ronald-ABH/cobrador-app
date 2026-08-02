@@ -40,9 +40,17 @@ function getTransporter() {
   const email = process.env.BACKUP_EMAIL_FROM;
   const pass = process.env.BACKUP_EMAIL_APP_PASSWORD;
   if (!email || !pass) return null;
+  // Se configura explícitamente el servidor de Gmail (en vez del atajo
+  // "service: gmail") y se fuerza IPv4. Algunos servidores en la nube
+  // (como Railway) no tienen salida IPv6 funcionando, y Node intenta usar
+  // IPv6 primero por defecto, lo que provoca "Connection timeout".
   return nodemailer.createTransport({
-    service: "gmail",
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
     auth: { user: email, pass },
+    family: 4,
+    connectionTimeout: 20000,
   });
 }
 
