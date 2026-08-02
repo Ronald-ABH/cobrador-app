@@ -3,7 +3,6 @@
 // siempre hay una copia completa de los datos en el correo configurado.
 const fs = require("fs");
 const path = require("path");
-const nodemailer = require("nodemailer");
 const cron = require("node-cron");
 const { backup: sqliteBackup } = require("node:sqlite");
 const { DB_PATH, db } = require("../db");
@@ -36,46 +35,48 @@ async function crearArchivoBackup() {
   return { destino, jsonPath, fecha };
 }
 
-function getTransporter() {
-  const email = process.env.BACKUP_EMAIL_FROM;
-  const pass = process.env.BACKUP_EMAIL_APP_PASSWORD;
-  if (!email || !pass) return null;
-  // Se configura explícitamente el servidor de Gmail (en vez del atajo
-  // "service: gmail") y se fuerza IPv4. Algunos servidores en la nube
-  // (como Railway) no tienen salida IPv6 funcionando, y Node intenta usar
-  // IPv6 primero por defecto, lo que provoca "Connection timeout".
-  return nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true,
-    auth: { user: email, pass },
-    family: 4,
-    connectionTimeout: 20000,
-  });
-}
-
+// Railway (y otros proveedores similares) bloquean las conexiones SMTP
+// salientes en sus planes básicos, así que en vez de conectarnos
+// directamente a Gmail, usamos la API de Resend (https://resend.com), que
+// envía el correo por HTTPS normal (igual que cualquier página web), sin
+// depender de puertos de correo que puedan estar bloqueados.
 async function enviarBackupPorCorreo() {
-  const transporter = getTransporter();
-  if (!transporter) {
+  const apiKey = process.env.RESEND_API_KEY;
+  const destinatarios = process.env.BACKUP_EMAIL_TO;
+
+  if (!apiKey || !destinatarios) {
     console.warn(
-      "[backup] BACKUP_EMAIL_FROM / BACKUP_EMAIL_APP_PASSWORD no configurados: no se envió copia por correo."
+      "[backup] RESEND_API_KEY / BACKUP_EMAIL_TO no configurados: no se envió copia por correo."
     );
-    return { enviado: false, motivo: "faltan credenciales de correo" };
+    return { enviado: false, motivo: "faltan RESEND_API_KEY o BACKUP_EMAIL_TO" };
   }
 
-  const destinatarios = process.env.BACKUP_EMAIL_TO || process.env.BACKUP_EMAIL_FROM;
   const { destino, jsonPath, fecha } = await crearArchivoBackup();
+  const dbBase64 = fs.readFileSync(destino).toString("base64");
+  const jsonBase64 = fs.readFileSync(jsonPath).toString("base64");
 
-  await transporter.sendMail({
-    from: process.env.BACKUP_EMAIL_FROM,
-    to: destinatarios,
-    subject: `Copia de seguridad Cobrador App - ${fecha}`,
-    text: `Copia de seguridad automática generada el ${fecha}.\n\nSe adjuntan dos archivos:\n- cobrador-backup-${fecha}.db (base de datos completa, para restaurar)\n- cobrador-backup-${fecha}.json (los mismos datos en texto legible)`,
-    attachments: [
-      { filename: path.basename(destino), path: destino },
-      { filename: path.basename(jsonPath), path: jsonPath },
-    ],
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: process.env.RESEND_FROM || "Cobrador App <onboarding@resend.dev>",
+      to: [destinatarios],
+      subject: `Copia de seguridad Cobrador App - ${fecha}`,
+      text: `Copia de seguridad automática generada el ${fecha}.\n\nSe adjuntan dos archivos:\n- cobrador-backup-${fecha}.db (base de datos completa, para restaurar)\n- cobrador-backup-${fecha}.json (los mismos datos en texto legible)`,
+      attachments: [
+        { filename: `cobrador-backup-${fecha}.db`, content: dbBase64 },
+        { filename: `cobrador-backup-${fecha}.json`, content: jsonBase64 },
+      ],
+    }),
   });
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`Resend respondió ${resp.status}: ${errText}`);
+  }
 
   console.log(`[backup] Copia de seguridad enviada por correo (${fecha})`);
   return { enviado: true, fecha };
