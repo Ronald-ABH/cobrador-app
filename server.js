@@ -1,4 +1,11 @@
 require("dotenv").config();
+const dns = require("dns");
+// Fuerza a Node a preferir IPv4 al resolver direcciones. Algunos servidores
+// en la nube (como Railway) no tienen salida IPv6 funcionando, y sin esto
+// las conexiones salientes (por ejemplo, al enviar el correo de backup)
+// pueden fallar con "Connection timeout".
+dns.setDefaultResultOrder("ipv4first");
+
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
