@@ -85,7 +85,7 @@ router.get("/agenda/hoy", (req, res) => {
     JOIN prestamos p ON p.id = cu.prestamo_id
     JOIN clientes c ON c.id = p.cliente_id
     LEFT JOIN rutas r ON r.id = c.ruta_id
-    WHERE p.estado = 'activo' AND cu.estado != 'pagada'
+    WHERE p.estado = 'activo' AND cu.estado != 'pagada' AND c.activo = 1
       AND cu.fecha_vencimiento <= ?
   `;
   const params = [hoy];
