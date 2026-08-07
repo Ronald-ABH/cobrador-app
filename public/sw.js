@@ -1,7 +1,10 @@
 // Service worker: permite instalar la app en el celular y que abra rápido.
 // Los datos siempre se piden en vivo al servidor (/api/...), esto solo
-// guarda en caché los archivos de la interfaz (HTML/CSS/JS/íconos).
-const CACHE = "cobrador-app-v1";
+// guarda en caché los archivos de la interfaz (HTML/CSS/JS/íconos), y solo
+// como respaldo por si algún día no hay conexión — NUNCA como primera
+// opción, para que las actualizaciones de la app siempre se vean al
+// instante.
+const CACHE = "cobrador-app-v2";
 const ARCHIVOS = [
   "/",
   "/index.html",
@@ -33,16 +36,16 @@ self.addEventListener("fetch", (event) => {
   // Nunca cachear llamadas a la API: siempre deben ir al servidor
   if (url.pathname.startsWith("/api/")) return;
 
+  // Estrategia "primero red": siempre intenta traer la versión más nueva
+  // del servidor. Solo si no hay internet, usa la copia guardada en caché
+  // como respaldo (para que la app no quede en blanco estando offline).
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return (
-        cached ||
-        fetch(event.request).then((resp) => {
-          const copy = resp.clone();
-          caches.open(CACHE).then((cache) => cache.put(event.request, copy));
-          return resp;
-        }).catch(() => cached)
-      );
-    })
+    fetch(event.request)
+      .then((resp) => {
+        const copy = resp.clone();
+        caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+        return resp;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
