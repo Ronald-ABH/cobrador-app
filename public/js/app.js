@@ -492,8 +492,25 @@ async function viewClienteDetalle(id) {
           ? `<div class="section-title"><span>Historial</span></div>` + otros.map(prestamoListItem).join("")
           : ""
       }
+
+      <button class="btn btn-danger btn-block" style="margin-top:24px;" onclick="eliminarCliente(${cliente.id}, ${prestamosActivos.length})">Eliminar cliente</button>
     </main>
   `;
+}
+
+async function eliminarCliente(id, tienePrestamosActivos) {
+  const advertencia = tienePrestamosActivos
+    ? "Este cliente tiene préstamos activos. Si lo eliminas, dejará de aparecer en tu lista de clientes (pero el historial de sus préstamos y pagos se conserva). ¿Seguro que quieres eliminarlo?"
+    : "¿Seguro que quieres eliminar este cliente? Dejará de aparecer en tu lista de clientes.";
+  if (!confirm(advertencia)) return;
+  try {
+    await api(`/clientes/${id}`, { method: "DELETE" });
+    state.cache.clientes = null;
+    toast("Cliente eliminado", "success");
+    go("clientes");
+  } catch (e) {
+    toast(e.message, "error");
+  }
 }
 
 function prestamoListItem(p) {
