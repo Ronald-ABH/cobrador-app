@@ -421,16 +421,16 @@ async function abrirNuevoCliente() {
     <div class="field"><label>Nombre completo *</label><input id="nc-nombre" required /></div>
     <div class="row-2">
       <div class="field"><label>Teléfono</label><input id="nc-telefono" /></div>
-      <div class="field"><label>Identificación</label><input id="nc-id" /></div>
+      <div class="field"><label>Identificación (opcional)</label><input id="nc-id" /></div>
     </div>
     <div class="field"><label>Dirección</label><input id="nc-direccion" /></div>
-    <div class="field"><label>Referencia / contacto de emergencia</label><input id="nc-referencia" /></div>
     <div class="field">
-      <label>Ruta de cobro</label>
+      <label>Ruta de cobro (opcional)</label>
       <select id="nc-ruta">
         <option value="">Sin ruta</option>
         ${rutas.map((r) => `<option value="${r.id}">${r.nombre}</option>`).join("")}
       </select>
+      <p class="muted" style="font-size:12px;margin:6px 0 0;">Una ruta es una zona o grupo de clientes que visitas juntos (ej. "Barrio Centro"). Si no tienes ninguna creada todavía, solo verás "Sin ruta" — puedes crearlas en Ajustes → Rutas de cobro y luego asignarlas aquí.</p>
     </div>
     <div class="field"><label>Notas</label><textarea id="nc-notas" rows="2"></textarea></div>
     <button class="btn btn-primary btn-block" onclick="guardarCliente()">Guardar cliente</button>
@@ -451,7 +451,6 @@ async function guardarCliente() {
         telefono: document.getElementById("nc-telefono").value.trim(),
         identificacion: document.getElementById("nc-id").value.trim(),
         direccion: document.getElementById("nc-direccion").value.trim(),
-        referencia: document.getElementById("nc-referencia").value.trim(),
         ruta_id: document.getElementById("nc-ruta").value || null,
         notas: document.getElementById("nc-notas").value.trim(),
       },
@@ -476,7 +475,6 @@ async function viewClienteDetalle(id) {
         ${cliente.telefono ? `<div style="padding:4px 0;"><span class="muted">Teléfono:</span> ${cliente.telefono}</div>` : ""}
         ${cliente.direccion ? `<div style="padding:4px 0;"><span class="muted">Dirección:</span> ${cliente.direccion}</div>` : ""}
         ${cliente.identificacion ? `<div style="padding:4px 0;"><span class="muted">Identificación:</span> ${cliente.identificacion}</div>` : ""}
-        ${cliente.referencia ? `<div style="padding:4px 0;"><span class="muted">Referencia:</span> ${cliente.referencia}</div>` : ""}
         ${cliente.notas ? `<div style="padding:4px 0;"><span class="muted">Notas:</span> ${cliente.notas}</div>` : ""}
       </div>
 
