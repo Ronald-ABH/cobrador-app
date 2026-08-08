@@ -532,6 +532,18 @@ async function abrirNuevoPrestamo(clienteIdPreseleccionado) {
   const clientes = state.cache.clientes || (await api("/clientes"));
   state.cache.clientes = clientes;
 
+  if (clientes.length === 0) {
+    openSheet(`
+      <h3>Nuevo préstamo</h3>
+      <div class="empty-state">
+        <div class="icon">👤</div>
+        <p>Todavía no tienes ningún cliente. Crea uno primero y luego podrás registrarle un préstamo.</p>
+      </div>
+      <button class="btn btn-primary btn-block" onclick="closeSheet(); go('clientes'); setTimeout(abrirNuevoCliente, 150);">+ Crear cliente</button>
+    `);
+    return;
+  }
+
   openSheet(`
     <h3>Nuevo préstamo</h3>
     <div id="form-error"></div>
@@ -548,10 +560,11 @@ async function abrirNuevoPrestamo(clienteIdPreseleccionado) {
     <div class="field">
       <label>Tipo de interés</label>
       <select id="np-tipo">
-        <option value="fijo">Fijo (sobre el monto original)</option>
-        <option value="saldo">Sobre saldo (cuota tipo bancario)</option>
-        <option value="capitalizado">Capitalizado (se acumula si hay mora)</option>
+        <option value="fijo">Fijo (tasa total del préstamo, ej. 20% = 20% una sola vez)</option>
+        <option value="saldo">Sobre saldo (tasa por cada cuota, tipo bancario)</option>
+        <option value="capitalizado">Capitalizado (tasa por cuota, se acumula si hay mora)</option>
       </select>
+      <p class="muted" style="font-size:12px;margin:6px 0 0;">En "Fijo" la tasa se cobra una sola vez sobre todo el préstamo (100.000 al 20% = 120.000 en total). En "Sobre saldo" y "Capitalizado" la tasa se cobra en cada cuota sobre el saldo pendiente.</p>
     </div>
     <div class="row-2">
       <div class="field">
