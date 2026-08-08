@@ -1,18 +1,18 @@
 // Cálculo de cuotas e intereses para un préstamo.
 //
-// tasa_interes: se interpreta como porcentaje POR CUOTA/PERIODO (no anual).
-//   Ej: préstamo semanal con tasa 5 => 5% de interés por cada semana.
-//
 // tipo_interes:
-//   - "fijo":  interés simple sobre el monto original, repartido en cuotas iguales.
-//              total_pagar = monto + (monto * tasa/100 * num_cuotas)
-//   - "saldo": cuota fija calculada por amortización sobre saldo (como un
-//              crédito bancario clásico): cada cuota paga interés sobre lo
-//              que falta por pagar, no sobre el monto original completo.
-//   - "capitalizado": igual a "saldo" al generar el préstamo, pero si una
-//              cuota se paga atrasada, el interés de los días de mora se
-//              suma (capitaliza) al saldo pendiente y las cuotas futuras
-//              se recalculan (ver utils/interest.js -> recalcularPorMora).
+//   - "fijo":  la tasa se aplica UNA SOLA VEZ sobre el monto total del
+//              préstamo (no por cuota). Ej: prestas 100.000 al 20% => el
+//              interés es 20.000 y el total a pagar es 120.000, sin
+//              importar en cuántas cuotas se reparta.
+//              total_pagar = monto + (monto * tasa/100)
+//   - "saldo": la tasa se interpreta como porcentaje POR CADA CUOTA/PERIODO
+//              (como un crédito bancario clásico, amortización sobre
+//              saldo): cada cuota paga interés sobre lo que falta por
+//              pagar, no sobre el monto original completo.
+//   - "capitalizado": igual a "saldo" al generar el préstamo (tasa por
+//              periodo), pero si una cuota se paga atrasada, el interés de
+//              los días de mora se suma (capitaliza) al saldo pendiente.
 
 const DIAS_POR_FRECUENCIA = {
   diario: 1,
@@ -34,8 +34,8 @@ function calcularValorCuota({ monto, tasa, tipo, num_cuotas }) {
     const cuota = (monto * i) / (1 - Math.pow(1 + i, -num_cuotas));
     return cuota;
   }
-  // fijo
-  const interesTotal = monto * i * num_cuotas;
+  // fijo: la tasa se cobra una sola vez sobre el monto total del préstamo
+  const interesTotal = monto * i;
   return (monto + interesTotal) / num_cuotas;
 }
 
