@@ -5,42 +5,71 @@ const { requireAuth } = require("../middleware/auth");
 const router = express.Router();
 router.use(requireAuth);
 
-// Registrar un pago sobre una cuota (permite pagos parciales)
+// Registrar un pago. Si el valor pagado es mayor que lo que falta de la
+// cuota indicada, el sobrante se va aplicando automáticamente a las
+// siguientes cuotas pendientes del mismo préstamo (de la más vieja a la
+// más nueva), en vez de quedar mal registrado en una sola cuota.
 router.post("/", (req, res) => {
   const { cuota_id, valor, notas } = req.body || {};
   if (!cuota_id || !valor || Number(valor) <= 0) {
     return res.status(400).json({ error: "Datos de pago inválidos" });
   }
 
-  const cuota = db.prepare("SELECT * FROM cuotas WHERE id = ?").get(cuota_id);
-  if (!cuota) return res.status(404).json({ error: "Cuota no encontrada" });
+  const cuotaRef = db.prepare("SELECT * FROM cuotas WHERE id = ?").get(cuota_id);
+  if (!cuotaRef) return res.status(404).json({ error: "Cuota no encontrada" });
+
+  let sobrante = 0;
 
   const tx = db.transaction(() => {
-    const nuevoPagado = Math.round((cuota.valor_pagado + Number(valor)) * 100) / 100;
-    const estado = nuevoPagado >= cuota.valor ? "pagada" : "parcial";
-    const fechaPago = estado === "pagada" ? new Date().toISOString() : cuota.fecha_pago;
+    let restante = Math.round(Number(valor) * 100) / 100;
 
-    db.prepare(
-      "UPDATE cuotas SET valor_pagado = ?, estado = ?, fecha_pago = ? WHERE id = ?"
-    ).run(nuevoPagado, estado, fechaPago, cuota_id);
+    // Todas las cuotas pendientes de este préstamo, de la más antigua a la
+    // más reciente, para repartir el pago en orden.
+    const cuotasPendientes = db
+      .prepare(
+        `SELECT * FROM cuotas WHERE prestamo_id = ? AND estado != 'pagada' ORDER BY numero`
+      )
+      .all(cuotaRef.prestamo_id);
 
-    db.prepare(
-      "INSERT INTO pagos (cuota_id, prestamo_id, valor, notas) VALUES (?, ?, ?, ?)"
-    ).run(cuota_id, cuota.prestamo_id, valor, notas || null);
+    for (const cuota of cuotasPendientes) {
+      if (restante <= 0) break;
+      const pendienteCuota = Math.round((cuota.valor - cuota.valor_pagado) * 100) / 100;
+      const aplicado = Math.min(restante, pendienteCuota);
+      if (aplicado <= 0) continue;
+
+      const nuevoPagado = Math.round((cuota.valor_pagado + aplicado) * 100) / 100;
+      const estado = nuevoPagado >= cuota.valor ? "pagada" : "parcial";
+      const fechaPago = estado === "pagada" ? new Date().toISOString() : cuota.fecha_pago;
+
+      db.prepare(
+        "UPDATE cuotas SET valor_pagado = ?, estado = ?, fecha_pago = ? WHERE id = ?"
+      ).run(nuevoPagado, estado, fechaPago, cuota.id);
+
+      db.prepare(
+        "INSERT INTO pagos (cuota_id, prestamo_id, valor, notas) VALUES (?, ?, ?, ?)"
+      ).run(cuota.id, cuota.prestamo_id, aplicado, notas || null);
+
+      restante = Math.round((restante - aplicado) * 100) / 100;
+    }
+
+    // Si sobra dinero después de cubrir TODAS las cuotas pendientes de este
+    // préstamo, significa que pagaron más de lo que debían en total. Ese
+    // sobrante no se aplica a nada (se informa al usuario en la respuesta).
+    sobrante = restante;
 
     // Si ya no quedan cuotas pendientes, marca el préstamo como pagado
     const pendientes = db
       .prepare(
         "SELECT COUNT(*) AS n FROM cuotas WHERE prestamo_id = ? AND estado != 'pagada'"
       )
-      .get(cuota.prestamo_id).n;
+      .get(cuotaRef.prestamo_id).n;
     if (pendientes === 0) {
-      db.prepare("UPDATE prestamos SET estado = 'pagado' WHERE id = ?").run(cuota.prestamo_id);
+      db.prepare("UPDATE prestamos SET estado = 'pagado' WHERE id = ?").run(cuotaRef.prestamo_id);
     }
   });
 
   tx();
-  res.json({ ok: true });
+  res.json({ ok: true, sobrante });
 });
 
 // Deshacer el último pago de una cuota (por si se registró un error)
