@@ -651,7 +651,10 @@ function cuotaRow(c, prestamo) {
   return `
     <div class="list-item">
       <div class="info">
-        <div class="title">Cuota #${c.numero} · ${fechaCorta(c.fecha_vencimiento)}</div>
+        <div class="title">
+          Cuota #${c.numero} · ${fechaCorta(c.fecha_vencimiento)}
+          <button class="btn-edit-fecha" title="Editar fecha" onclick="abrirEditarFecha(${prestamo.id}, ${c.id}, '${c.fecha_vencimiento}', ${c.numero})">✏️</button>
+        </div>
         <div class="subtitle">${money(c.valor)} ${c.valor_pagado > 0 ? "· pagado " + money(c.valor_pagado) : ""}</div>
       </div>
       <div style="text-align:right;">
@@ -664,6 +667,35 @@ function cuotaRow(c, prestamo) {
       </div>
     </div>
   `;
+}
+
+function abrirEditarFecha(prestamoId, cuotaId, fechaActual, numero) {
+  openSheet(`
+    <h3>Editar fecha · Cuota #${numero}</h3>
+    <div id="form-error"></div>
+    <p class="muted" style="margin-top:-8px;">Las cuotas siguientes se recalculan solas a partir de esta nueva fecha, respetando la frecuencia del préstamo.</p>
+    <div class="field"><label>Nueva fecha de vencimiento</label><input id="ef-fecha" type="date" value="${fechaActual}" /></div>
+    <button class="btn btn-primary btn-block" onclick="guardarFechaCuota(${prestamoId}, ${cuotaId})">Guardar fecha</button>
+  `);
+}
+
+async function guardarFechaCuota(prestamoId, cuotaId) {
+  const fecha_vencimiento = document.getElementById("ef-fecha").value;
+  if (!fecha_vencimiento) {
+    document.getElementById("form-error").innerHTML = `<div class="error-msg">Elige una fecha</div>`;
+    return;
+  }
+  try {
+    await api(`/prestamos/${prestamoId}/cuotas/${cuotaId}/fecha`, {
+      method: "PUT",
+      body: { fecha_vencimiento },
+    });
+    closeSheet();
+    toast("Fecha actualizada", "success");
+    renderCurrentView();
+  } catch (e) {
+    document.getElementById("form-error").innerHTML = `<div class="error-msg">${e.message}</div>`;
+  }
 }
 
 async function cancelarPrestamo(id) {
