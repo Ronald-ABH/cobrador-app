@@ -1,7 +1,7 @@
 const express = require("express");
 const { db } = require("../db");
 const { requireAuth } = require("../middleware/auth");
-const { generarCuotas } = require("../utils/interest");
+const { generarCuotas, DIAS_POR_FRECUENCIA, sumarDias } = require("../utils/interest");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -91,6 +91,52 @@ router.post("/", (req, res) => {
 
 router.put("/:id/cancelar", (req, res) => {
   db.prepare("UPDATE prestamos SET estado = 'cancelado' WHERE id = ?").run(req.params.id);
+  res.json({ ok: true });
+});
+
+// Editar la fecha de vencimiento de una cuota puntual. Las cuotas siguientes
+// (número mayor) se recalculan automáticamente en cadena, cada una a la
+// distancia normal de la frecuencia del préstamo, contando desde la nueva
+// fecha. Así, si el cliente empieza a pagar más tarde de lo previsto (o el
+// dueño simplemente se equivocó al poner la fecha), basta con corregir esa
+// cuota y el resto del calendario se acomoda solo.
+router.put("/:prestamoId/cuotas/:cuotaId/fecha", (req, res) => {
+  const { fecha_vencimiento } = req.body || {};
+  if (!fecha_vencimiento) {
+    return res.status(400).json({ error: "Falta la nueva fecha" });
+  }
+
+  const prestamo = db.prepare("SELECT * FROM prestamos WHERE id = ?").get(req.params.prestamoId);
+  if (!prestamo) return res.status(404).json({ error: "Préstamo no encontrado" });
+
+  const cuota = db
+    .prepare("SELECT * FROM cuotas WHERE id = ? AND prestamo_id = ?")
+    .get(req.params.cuotaId, prestamo.id);
+  if (!cuota) return res.status(404).json({ error: "Cuota no encontrada" });
+
+  const diasPeriodo = DIAS_POR_FRECUENCIA[prestamo.frecuencia] || 1;
+
+  const tx = db.transaction(() => {
+    db.prepare("UPDATE cuotas SET fecha_vencimiento = ? WHERE id = ?").run(
+      fecha_vencimiento,
+      cuota.id
+    );
+
+    const siguientes = db
+      .prepare("SELECT * FROM cuotas WHERE prestamo_id = ? AND numero > ? ORDER BY numero")
+      .all(prestamo.id, cuota.numero);
+
+    let fechaAnterior = fecha_vencimiento;
+    for (const sig of siguientes) {
+      fechaAnterior = sumarDias(fechaAnterior, diasPeriodo);
+      db.prepare("UPDATE cuotas SET fecha_vencimiento = ? WHERE id = ?").run(
+        fechaAnterior,
+        sig.id
+      );
+    }
+  });
+
+  tx();
   res.json({ ok: true });
 });
 
