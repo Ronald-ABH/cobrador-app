@@ -88,7 +88,17 @@ router.delete("/:pagoId", (req, res) => {
       cuota.id
     );
     db.prepare("DELETE FROM pagos WHERE id = ?").run(pago.id);
-    db.prepare("UPDATE prestamos SET estado = 'activo' WHERE id = ?").run(pago.prestamo_id);
+
+    // Si el préstamo estaba marcado 'pagado' (todas sus cuotas al día),
+    // deshacer este pago hace que vuelva a quedar deuda pendiente, así que
+    // pasa a 'activo'. Pero si el préstamo estaba 'cancelado' (una decisión
+    // manual del usuario), deshacer un pago viejo no debe reactivarlo solo:
+    // antes esto pasaba sin condición, y corregir un pago de un préstamo ya
+    // cancelado lo revivía sin que nadie lo pidiera.
+    const prestamo = db.prepare("SELECT estado FROM prestamos WHERE id = ?").get(pago.prestamo_id);
+    if (prestamo && prestamo.estado === "pagado") {
+      db.prepare("UPDATE prestamos SET estado = 'activo' WHERE id = ?").run(pago.prestamo_id);
+    }
   });
   tx();
   res.json({ ok: true });
