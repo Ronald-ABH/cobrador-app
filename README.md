@@ -122,13 +122,49 @@ Railway despliega desde un repositorio de GitHub.
 
 ## 7. Uso diario
 
-- Cada noche a las 11:59 pm (hora del servidor) se envía automáticamente un
-  correo a `ronaldbarrios31peluqueria@gmail.com` con la base de datos
-  completa adjunta. Puedes cambiar la hora con la variable de entorno
-  `BACKUP_CRON` (formato cron; por defecto `59 23 * * *`).
+- Cada noche a las 11:59 pm **hora de Colombia** (no la hora del servidor) se
+  envía automáticamente un correo a `ronaldbarrios31peluqueria@gmail.com` con
+  la base de datos completa adjunta. Puedes cambiar la hora con la variable
+  de entorno `BACKUP_CRON` (formato cron; por defecto `59 23 * * *`), y la
+  zona horaria con `APP_TIMEZONE` (por defecto `America/Bogota`).
 - Si algún día necesitas recuperar los datos desde una copia de seguridad,
   guarda el archivo adjunto `cobrador-backup-FECHA.db` y contáctame para
   restaurarlo en el servidor.
+
+## 8. (Opcional) Mover el frontend a Vercel
+
+Si quieres que la interfaz (lo que está en `public/`) se sirva desde Vercel
+en vez de desde Railway —por ejemplo, para rediseñarla por separado sin
+tocar el servidor—, puedes hacerlo sin cambiar nada del login ni de las
+cookies de sesión, gracias a un "proxy" que ya viene configurado en
+`public/vercel.json`.
+
+Cómo funciona: Vercel sirve el HTML/CSS/JS, y cualquier petición a
+`/api/*` la reenvía por detrás hacia tu Railway. Para el navegador, todo
+sigue pareciendo un solo sitio (el de Vercel) — por eso la cookie de sesión
+sigue funcionando exactamente igual que ahora, sin tener que tocar
+`SameSite`, CORS, ni cambiar el login a otro esquema.
+
+Pasos:
+
+1. Entra a [vercel.com](https://vercel.com) e inicia sesión con GitHub.
+2. **Add New → Project** → selecciona este mismo repositorio (`cobrador-app`).
+3. En la configuración del proyecto, en **Root Directory**, elige la carpeta
+   `public`. Framework Preset: "Other" (no hace falta build ni instalar
+   dependencias, son archivos estáticos).
+4. Antes de desplegar, revisa `public/vercel.json`: la URL de `destination`
+   debe apuntar a tu Railway (`https://TU-APP.up.railway.app/api/:path*`).
+   Si tu URL de Railway cambia en el futuro, actualiza este archivo.
+5. Despliega. Vercel te da una URL propia (algo como
+   `https://cobrador-app.vercel.app`) — esa pasa a ser la dirección que usas
+   para entrar e instalar la PWA en el celular, en vez de la de Railway.
+6. Railway sigue corriendo, pero ahora solo como API/backend: ya no hace
+   falta visitar su URL directamente (aunque `/api/sistema/ping` te sigue
+   sirviendo para el monitor de UptimeRobot del paso 4).
+
+Antes de configurarlo, confirma en la documentación de Vercel que las
+"rewrites" hacia una URL externa (proxy) siguen disponibles en el plan que
+vayas a usar — son detalles que cambian con el tiempo.
 
 ## Desarrollo local (opcional, para hacer cambios)
 
@@ -150,5 +186,7 @@ cobrador-app/
   routes/                 # endpoints de la API (clientes, préstamos, pagos...)
   utils/interest.js       # cálculo de intereses y cuotas
   utils/backup.js         # copia de seguridad diaria por correo
+  utils/fecha.js          # "hoy" en hora de Colombia (no UTC)
   public/                 # interfaz (HTML/CSS/JS) tipo app móvil (PWA)
+  public/vercel.json      # proxy /api/* -> Railway, para desplegar public/ en Vercel
 ```
