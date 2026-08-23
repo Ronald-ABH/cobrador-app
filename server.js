@@ -24,6 +24,15 @@ const sistemaRoutes = require("./routes/sistema");
 
 const app = express();
 
+// Railway (y Vercel, si se usa como proxy del frontend) entregan las
+// peticiones a través de un proxy inverso. Sin esto, Express ve la IP del
+// proxy como si fuera la de todos los visitantes (en vez de la real, que
+// viene en X-Forwarded-For), lo que rompería el límite de intentos de
+// login: todo el mundo compartiría el mismo contador.
+// "1" = confiar solo en el primer proxy (el de la plataforma), no en
+// cualquier proxy intermedio que un atacante pudiera inventarse.
+app.set("trust proxy", 1);
+
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());

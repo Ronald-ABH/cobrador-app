@@ -1,6 +1,7 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const rateLimit = require("express-rate-limit");
 const { db } = require("../db");
 const { requireAuth, SECRET } = require("../middleware/auth");
 
@@ -13,7 +14,20 @@ const COOKIE_OPTS = {
   maxAge: 30 * 24 * 60 * 60 * 1000, // 30 días
 };
 
-router.post("/login", (req, res) => {
+// La app es de un solo usuario administrador y queda expuesta en una URL
+// pública (Railway), así que sin esto el login es un blanco fácil para
+// fuerza bruta. Se limita por IP: 10 intentos cada 15 minutos, y los
+// intentos que sí llegan a la contraseña correcta no cuentan (skipSuccessfulRequests).
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: "Demasiados intentos. Espera unos minutos e intenta de nuevo." },
+});
+
+router.post("/login", loginLimiter, (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ error: "Usuario y contraseña son obligatorios" });
