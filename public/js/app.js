@@ -38,8 +38,18 @@ function iniciales(nombre) {
     .join("");
 }
 
+// Fecha de "hoy" en hora de Colombia (no en UTC). new Date().toISOString()
+// siempre da la fecha en UTC, así que entre las 7pm y la medianoche (hora
+// Bogotá) ya "es mañana" para UTC — eso hacía que las cuotas de mañana
+// aparecieran como si vencieran hoy, y que la fecha sugerida al crear un
+// préstamo se adelantara un día en la noche.
 function hoyISO() {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
 async function api(path, options = {}) {

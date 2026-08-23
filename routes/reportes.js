@@ -1,12 +1,22 @@
 const express = require("express");
 const { db } = require("../db");
 const { requireAuth } = require("../middleware/auth");
+const { hoyISO, sumarDiasISO, SQLITE_OFFSET } = require("../utils/fecha");
 
 const router = express.Router();
 router.use(requireAuth);
 
+// pagos.fecha se guarda como instante UTC (datetime('now') / toISOString()).
+// Para agruparlo "por día calendario de Colombia" hay que restarle el
+// desfase horario antes de pedirle la fecha a SQLite; si no, un pago hecho
+// a las 8pm en Bogotá (ya medianoche o más en UTC) se contaría en el día
+// siguiente. Colombia no tiene horario de verano, así que el desfase es
+// siempre el mismo (ver utils/fecha.js).
+const FECHA_LOCAL_SQL = `date(pa.fecha, '${SQLITE_OFFSET}')`;
+
 router.get("/resumen", (req, res) => {
-  const hoy = new Date().toISOString().slice(0, 10);
+  // Fecha de hoy en hora de Colombia, no en UTC (ver utils/fecha.js).
+  const hoy = hoyISO();
 
   // En todas las consultas se une con "clientes" y se exige activo = 1, para
   // que los préstamos y pagos de un cliente eliminado dejen de contarse en
@@ -45,7 +55,7 @@ router.get("/resumen", (req, res) => {
        FROM pagos pa
        JOIN prestamos p ON p.id = pa.prestamo_id
        JOIN clientes c ON c.id = p.cliente_id
-       WHERE date(pa.fecha) = ? AND c.activo = 1`
+       WHERE ${FECHA_LOCAL_SQL} = ? AND c.activo = 1`
     )
     .get(hoy).v;
 
@@ -95,17 +105,18 @@ router.get("/resumen", (req, res) => {
 
 // Recaudo agrupado por día, para un rango de fechas (por defecto últimos 30 días)
 router.get("/recaudo-por-dia", (req, res) => {
-  const desde = req.query.desde || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-  const hasta = req.query.hasta || new Date().toISOString().slice(0, 10);
+  const hoy = hoyISO();
+  const desde = req.query.desde || sumarDiasISO(hoy, -30);
+  const hasta = req.query.hasta || hoy;
 
   const rows = db
     .prepare(
-      `SELECT date(pa.fecha) AS dia, SUM(pa.valor) AS total
+      `SELECT ${FECHA_LOCAL_SQL} AS dia, SUM(pa.valor) AS total
        FROM pagos pa
        JOIN prestamos p ON p.id = pa.prestamo_id
        JOIN clientes c ON c.id = p.cliente_id
-       WHERE date(pa.fecha) BETWEEN ? AND ? AND c.activo = 1
-       GROUP BY date(pa.fecha)
+       WHERE ${FECHA_LOCAL_SQL} BETWEEN ? AND ? AND c.activo = 1
+       GROUP BY ${FECHA_LOCAL_SQL}
        ORDER BY dia`
     )
     .all(desde, hasta);

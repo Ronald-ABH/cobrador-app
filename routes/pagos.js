@@ -1,6 +1,7 @@
 const express = require("express");
 const { db } = require("../db");
 const { requireAuth } = require("../middleware/auth");
+const { hoyISO } = require("../utils/fecha");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -103,7 +104,8 @@ router.get("/prestamo/:prestamoId", (req, res) => {
 
 // Cuotas del día (para la ruta de cobro de hoy), opcionalmente filtradas por ruta
 router.get("/agenda/hoy", (req, res) => {
-  const hoy = new Date().toISOString().slice(0, 10);
+  // Fecha de hoy en hora de Colombia, no en UTC (ver utils/fecha.js).
+  const hoy = hoyISO();
   const rutaId = req.query.ruta_id;
 
   let query = `

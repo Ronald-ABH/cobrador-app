@@ -84,12 +84,21 @@ async function enviarBackupPorCorreo() {
 
 function iniciarBackupProgramado() {
   const expresion = process.env.BACKUP_CRON || "59 23 * * *"; // 11:59pm por defecto
-  cron.schedule(expresion, () => {
-    enviarBackupPorCorreo().catch((err) =>
-      console.error("[backup] Error enviando copia de seguridad:", err.message)
-    );
-  });
-  console.log(`[backup] Copia de seguridad programada diariamente (${expresion})`);
+  // Se fija explícitamente la zona horaria de Colombia: sin esto, "11:59pm"
+  // se interpreta en la hora local del servidor (en Railway, normalmente
+  // UTC), así que el backup terminaría enviándose a media tarde en vez de
+  // a las 11:59pm hora Colombia.
+  const zona = process.env.APP_TIMEZONE || "America/Bogota";
+  cron.schedule(
+    expresion,
+    () => {
+      enviarBackupPorCorreo().catch((err) =>
+        console.error("[backup] Error enviando copia de seguridad:", err.message)
+      );
+    },
+    { timezone: zona }
+  );
+  console.log(`[backup] Copia de seguridad programada diariamente (${expresion}, zona ${zona})`);
 }
 
 module.exports = { enviarBackupPorCorreo, iniciarBackupProgramado, crearArchivoBackup, BACKUP_DIR };
