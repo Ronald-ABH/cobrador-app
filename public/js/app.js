@@ -38,6 +38,21 @@ function iniciales(nombre) {
     .join("");
 }
 
+// Los datos de clientes (nombre, dirección, notas...) vienen de formularios
+// y se insertan con innerHTML en varias vistas. Sin escapar, un nombre como
+// `<img src=x onerror=...>` se ejecutaría como HTML/JS en vez de mostrarse
+// como texto. Con un solo usuario administrador el riesgo es bajo, pero es
+// una buena práctica no depender de eso.
+function escapeHtml(valor) {
+  return String(valor ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[ch]);
+}
+
 // Fecha de "hoy" en hora de Colombia (no en UTC). new Date().toISOString()
 // siempre da la fecha en UTC, así que entre las 7pm y la medianoche (hora
 // Bogotá) ya "es mañana" para UTC — eso hacía que las cuotas de mañana
@@ -331,10 +346,10 @@ function cuotaListItem(c) {
   const estadoTexto = c.atrasada ? "Atrasada" : "Hoy";
   return `
     <div class="list-item" onclick="go('cliente-detalle', {id: ${c.cliente_id}})">
-      <div class="avatar">${iniciales(c.cliente_nombre)}</div>
+      <div class="avatar">${escapeHtml(iniciales(c.cliente_nombre))}</div>
       <div class="info">
-        <div class="title">${c.cliente_nombre}</div>
-        <div class="subtitle">${c.ruta_nombre || "Sin ruta"} · Cuota #${c.numero} · ${fechaCorta(c.fecha_vencimiento)}</div>
+        <div class="title">${escapeHtml(c.cliente_nombre)}</div>
+        <div class="subtitle">${escapeHtml(c.ruta_nombre) || "Sin ruta"} · Cuota #${c.numero} · ${fechaCorta(c.fecha_vencimiento)}</div>
       </div>
       <div style="text-align:right;">
         <div class="amount debt">${money(c.valor - c.valor_pagado)}</div>
@@ -355,7 +370,7 @@ async function viewAgenda() {
   ]);
 
   const filtros = `<option value="">Todas las rutas</option>` +
-    rutas.map((r) => `<option value="${r.id}" ${String(r.id) === String(rutaId) ? "selected" : ""}>${r.nombre}</option>`).join("");
+    rutas.map((r) => `<option value="${r.id}" ${String(r.id) === String(rutaId) ? "selected" : ""}>${escapeHtml(r.nombre)}</option>`).join("");
 
   return `
     ${topbar("Agenda de cobro")}
@@ -368,15 +383,15 @@ async function viewAgenda() {
           ? `<div class="empty-state"><div class="icon">✅</div><p>No hay cuotas pendientes${rutaId ? " en esta ruta" : ""}</p></div>`
           : agenda.map((c) => `
             <div class="list-item">
-              <div class="avatar">${iniciales(c.cliente_nombre)}</div>
+              <div class="avatar">${escapeHtml(iniciales(c.cliente_nombre))}</div>
               <div class="info" onclick="go('cliente-detalle', {id: ${c.cliente_id}})">
-                <div class="title">${c.cliente_nombre}</div>
-                <div class="subtitle">${c.direccion || c.telefono || ""} · Cuota #${c.numero}</div>
+                <div class="title">${escapeHtml(c.cliente_nombre)}</div>
+                <div class="subtitle">${escapeHtml(c.direccion || c.telefono || "")} · Cuota #${c.numero}</div>
                 <span class="badge ${c.atrasada ? "atrasada" : "pendiente"}">${c.atrasada ? "Atrasada · " + fechaCorta(c.fecha_vencimiento) : "Vence hoy"}</span>
               </div>
               <div style="text-align:right;">
                 <div class="amount debt">${money(c.valor - c.valor_pagado)}</div>
-                <button class="btn btn-primary btn-sm" style="margin-top:6px;" onclick="abrirRegistrarPago(${c.id}, ${c.valor - c.valor_pagado}, '${(c.cliente_nombre || "").replace(/'/g, "")}')">Cobrar</button>
+                <button class="btn btn-primary btn-sm" style="margin-top:6px;" onclick="abrirRegistrarPago(${c.id}, ${c.valor - c.valor_pagado}, '${(c.cliente_nombre || "").replace(/['"\\]/g, "")}')">Cobrar</button>
               </div>
             </div>
           `).join("")
@@ -408,10 +423,10 @@ async function viewClientes() {
           ? `<div class="empty-state"><div class="icon">👤</div><p>${clientes.length === 0 ? "Todavía no tienes clientes" : "No se encontraron clientes"}</p></div>`
           : filtrados.map((c) => `
             <div class="list-item" onclick="go('cliente-detalle', {id: ${c.id}})">
-              <div class="avatar">${iniciales(c.nombre)}</div>
+              <div class="avatar">${escapeHtml(iniciales(c.nombre))}</div>
               <div class="info">
-                <div class="title">${c.nombre}</div>
-                <div class="subtitle">${c.ruta_nombre || "Sin ruta"} ${c.telefono ? "· " + c.telefono : ""}</div>
+                <div class="title">${escapeHtml(c.nombre)}</div>
+                <div class="subtitle">${escapeHtml(c.ruta_nombre) || "Sin ruta"} ${c.telefono ? "· " + escapeHtml(c.telefono) : ""}</div>
               </div>
               <div class="amount ${c.deuda_pendiente > 0 ? "debt" : "ok"}">${c.deuda_pendiente > 0 ? money(c.deuda_pendiente) : "Al día"}</div>
             </div>
@@ -438,7 +453,7 @@ async function abrirNuevoCliente() {
       <label>Ruta de cobro (opcional)</label>
       <select id="nc-ruta">
         <option value="">Sin ruta</option>
-        ${rutas.map((r) => `<option value="${r.id}">${r.nombre}</option>`).join("")}
+        ${rutas.map((r) => `<option value="${r.id}">${escapeHtml(r.nombre)}</option>`).join("")}
       </select>
       <p class="muted" style="font-size:12px;margin:6px 0 0;">Una ruta es una zona o grupo de clientes que visitas juntos (ej. "Barrio Centro"). Si no tienes ninguna creada todavía, solo verás "Sin ruta" — puedes crearlas en Ajustes → Rutas de cobro y luego asignarlas aquí.</p>
     </div>
@@ -479,16 +494,16 @@ async function viewClienteDetalle(id) {
   const otros = cliente.prestamos.filter((p) => p.estado !== "activo");
 
   return `
-    ${topbar(cliente.nombre, "clientes")}
+    ${topbar(escapeHtml(cliente.nombre), "clientes")}
     <main class="view">
       <div class="card">
-        ${cliente.telefono ? `<div style="padding:4px 0;"><span class="muted">Teléfono:</span> ${cliente.telefono}</div>` : ""}
-        ${cliente.direccion ? `<div style="padding:4px 0;"><span class="muted">Dirección:</span> ${cliente.direccion}</div>` : ""}
-        ${cliente.identificacion ? `<div style="padding:4px 0;"><span class="muted">Identificación:</span> ${cliente.identificacion}</div>` : ""}
-        ${cliente.notas ? `<div style="padding:4px 0;"><span class="muted">Notas:</span> ${cliente.notas}</div>` : ""}
+        ${cliente.telefono ? `<div style="padding:4px 0;"><span class="muted">Teléfono:</span> ${escapeHtml(cliente.telefono)}</div>` : ""}
+        ${cliente.direccion ? `<div style="padding:4px 0;"><span class="muted">Dirección:</span> ${escapeHtml(cliente.direccion)}</div>` : ""}
+        ${cliente.identificacion ? `<div style="padding:4px 0;"><span class="muted">Identificación:</span> ${escapeHtml(cliente.identificacion)}</div>` : ""}
+        ${cliente.notas ? `<div style="padding:4px 0;"><span class="muted">Notas:</span> ${escapeHtml(cliente.notas)}</div>` : ""}
       </div>
 
-      <button class="btn btn-primary btn-block" onclick="abrirNuevoPrestamo(${cliente.id})">+ Nuevo préstamo para ${cliente.nombre.split(" ")[0]}</button>
+      <button class="btn btn-primary btn-block" onclick="abrirNuevoPrestamo(${cliente.id})">+ Nuevo préstamo para ${escapeHtml(cliente.nombre.split(" ")[0])}</button>
 
       <div class="section-title"><span>Préstamos activos</span></div>
       ${
@@ -560,7 +575,7 @@ async function abrirNuevoPrestamo(clienteIdPreseleccionado) {
     <div class="field">
       <label>Cliente *</label>
       <select id="np-cliente">
-        ${clientes.map((c) => `<option value="${c.id}" ${clienteIdPreseleccionado == c.id ? "selected" : ""}>${c.nombre}</option>`).join("")}
+        ${clientes.map((c) => `<option value="${c.id}" ${clienteIdPreseleccionado == c.id ? "selected" : ""}>${escapeHtml(c.nombre)}</option>`).join("")}
       </select>
     </div>
     <div class="row-2">
@@ -637,7 +652,7 @@ async function viewPrestamoDetalle(id) {
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <div>
-            <div class="title" style="font-size:17px;font-weight:700;">${p.cliente.nombre}</div>
+            <div class="title" style="font-size:17px;font-weight:700;">${escapeHtml(p.cliente.nombre)}</div>
             <div class="subtitle muted">${money(p.monto)} prestados · ${p.tipo_interes} · ${p.frecuencia}</div>
           </div>
           <span class="badge ${p.estado}">${p.estado}</span>
@@ -761,7 +776,7 @@ async function viewRutas() {
           ? `<div class="empty-state"><div class="icon">🗺️</div><p>Todavía no tienes rutas creadas</p></div>`
           : rutas.map((r) => `
             <div class="list-item">
-              <div class="info"><div class="title">${r.nombre}</div></div>
+              <div class="info"><div class="title">${escapeHtml(r.nombre)}</div></div>
               <button class="btn btn-danger btn-sm" onclick="borrarRuta(${r.id})">Eliminar</button>
             </div>
           `).join("")
@@ -834,7 +849,7 @@ async function viewAjustes() {
     <main class="view">
       <div class="section-title"><span>Cuenta</span></div>
       <div class="card">
-        <div style="padding:4px 0;"><span class="muted">Usuario:</span> <b>${state.user.username}</b></div>
+        <div style="padding:4px 0;"><span class="muted">Usuario:</span> <b>${escapeHtml(state.user.username)}</b></div>
       </div>
 
       <div class="section-title"><span>Organización</span></div>
