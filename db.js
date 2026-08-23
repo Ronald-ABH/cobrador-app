@@ -124,6 +124,36 @@ CREATE TABLE IF NOT EXISTS pagos (
   FOREIGN KEY (cuota_id) REFERENCES cuotas(id),
   FOREIGN KEY (prestamo_id) REFERENCES prestamos(id)
 );
+
+-- Empeños: dinero prestado dejando un objeto en garantía. Es un negocio
+-- aparte de los préstamos normales (no comparten cuotas ni se mezclan en
+-- los reportes de dinero): aquí solo se paga un interés fijo mes a mes
+-- para mantener la prenda, y el valor prestado se paga completo de una
+-- sola vez cuando el cliente la rescata (ahí no se cobra el interés de
+-- ese mes).
+CREATE TABLE IF NOT EXISTS empenos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cliente_id INTEGER NOT NULL,
+  descripcion TEXT NOT NULL,
+  valor REAL NOT NULL,
+  interes_mensual REAL NOT NULL,
+  fecha_inicio TEXT NOT NULL,
+  fecha_proximo_pago TEXT NOT NULL,
+  estado TEXT NOT NULL DEFAULT 'activo', -- activo | pagado | cancelado
+  notas TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+);
+
+CREATE TABLE IF NOT EXISTS pagos_empeno (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  empeno_id INTEGER NOT NULL,
+  tipo TEXT NOT NULL, -- interes | rescate
+  valor REAL NOT NULL,
+  fecha TEXT DEFAULT (datetime('now')),
+  notas TEXT,
+  FOREIGN KEY (empeno_id) REFERENCES empenos(id)
+);
 `);
 
 // Crea el usuario administrador inicial si todavía no existe ningún usuario.

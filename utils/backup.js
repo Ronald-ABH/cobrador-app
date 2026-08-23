@@ -28,6 +28,8 @@ async function crearArchivoBackup() {
     prestamos: db.prepare("SELECT * FROM prestamos").all(),
     cuotas: db.prepare("SELECT * FROM cuotas").all(),
     pagos: db.prepare("SELECT * FROM pagos").all(),
+    empenos: db.prepare("SELECT * FROM empenos").all(),
+    pagos_empeno: db.prepare("SELECT * FROM pagos_empeno").all(),
   };
   const jsonPath = path.join(BACKUP_DIR, `cobrador-backup-${fecha}.json`);
   fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2));

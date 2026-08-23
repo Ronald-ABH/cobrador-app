@@ -45,4 +45,19 @@ function sumarDiasISO(fechaISO, dias) {
   return f.toISOString().slice(0, 10);
 }
 
-module.exports = { TZ, SQLITE_OFFSET, hoyISO, sumarDiasISO };
+// Suma (o resta) meses de calendario a una fecha "YYYY-MM-DD", usada para
+// la fecha de pago mensual de los empeños. Si el mes de destino tiene menos
+// días que el original (ej. 31 de enero + 1 mes), se ajusta al último día
+// de ese mes en vez de "desbordarse" a marzo.
+function sumarMesesISO(fechaISO, meses) {
+  const [y, m, d] = fechaISO.split("-").map(Number);
+  const primerDiaDestino = new Date(Date.UTC(y, m - 1 + meses, 1));
+  const diasEnMesDestino = new Date(
+    Date.UTC(primerDiaDestino.getUTCFullYear(), primerDiaDestino.getUTCMonth() + 1, 0)
+  ).getUTCDate();
+  const dia = Math.min(d, diasEnMesDestino);
+  const resultado = new Date(Date.UTC(primerDiaDestino.getUTCFullYear(), primerDiaDestino.getUTCMonth(), dia));
+  return resultado.toISOString().slice(0, 10);
+}
+
+module.exports = { TZ, SQLITE_OFFSET, hoyISO, sumarDiasISO, sumarMesesISO };

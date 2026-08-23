@@ -23,9 +23,18 @@ function money(n) {
   return "$" + v.toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function fechaCorta(iso) {
-  if (!iso) return "-";
-  const d = new Date(iso.includes("T") ? iso : iso + "T00:00:00");
+function fechaCorta(fecha) {
+  if (!fecha) return "-";
+  // Las fechas simples (YYYY-MM-DD) se interpretan como medianoche local.
+  // Las que vienen de SQLite con datetime('now') traen fecha y hora
+  // separadas por un espacio (ej. "2026-08-23 23:43:40") en vez de "T",
+  // y son en UTC — hay que convertirlas al formato ISO real para que
+  // Date las entienda en vez de devolver "Invalid Date".
+  let iso = fecha;
+  if (!iso.includes("T")) {
+    iso = iso.includes(" ") ? iso.replace(" ", "T") + "Z" : iso + "T00:00:00";
+  }
+  const d = new Date(iso);
   return d.toLocaleDateString("es-CO", { day: "2-digit", month: "short" });
 }
 
@@ -129,6 +138,7 @@ const ICONS = {
   back: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`,
   plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`,
   ruta: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5V13a4 4 0 0 0 4 4h2a4 4 0 0 1 4 4"/></svg>`,
+  empeno: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 8.5 12 14l9-5.5L12 3Z"/><path d="M3 8.5V15L12 20.5 21 15V8.5"/><path d="M12 14v6.5"/></svg>`,
 };
 
 // ---------------------------------------------------------------------
@@ -173,6 +183,7 @@ function render() {
         ${navItem("dashboard", ICONS.home, "Inicio")}
         ${navItem("agenda", ICONS.agenda, "Agenda")}
         ${navItem("clientes", ICONS.clientes, "Clientes")}
+        ${navItem("empenos", ICONS.empeno, "Empeños")}
         ${navItem("reportes", ICONS.reportes, "Reportes")}
         ${navItem("ajustes", ICONS.ajustes, "Ajustes")}
       </nav>
@@ -182,7 +193,7 @@ function render() {
 }
 
 function navItem(view, icon, label) {
-  const raiz = ["dashboard", "agenda", "clientes", "reportes", "ajustes"];
+  const raiz = ["dashboard", "agenda", "clientes", "empenos", "reportes", "ajustes"];
   const active = state.view === view || (!raiz.includes(state.view) && view === "dashboard" && false);
   return `<button class="nav-item ${state.view === view ? "active" : ""}" onclick="go('${view}')">
       ${icon}<span>${label}</span>
@@ -200,6 +211,8 @@ async function renderCurrentView() {
       case "clientes": html = await viewClientes(); break;
       case "cliente-detalle": html = await viewClienteDetalle(state.params.id); break;
       case "prestamo-detalle": html = await viewPrestamoDetalle(state.params.id); break;
+      case "empenos": html = await viewEmpenos(); break;
+      case "empeno-detalle": html = await viewEmpenoDetalle(state.params.id); break;
       case "reportes": html = await viewReportes(); break;
       case "ajustes": html = await viewAjustes(); break;
       case "rutas": html = await viewRutas(); break;
@@ -212,7 +225,7 @@ async function renderCurrentView() {
   }
   // refresca clases activas del menú
   document.querySelectorAll(".nav-item").forEach((btn) => btn.classList.remove("active"));
-  const raiz = ["dashboard", "agenda", "clientes", "reportes", "ajustes"];
+  const raiz = ["dashboard", "agenda", "clientes", "empenos", "reportes", "ajustes"];
   const activo = raiz.includes(state.view) ? state.view : null;
   if (activo) {
     const idx = raiz.indexOf(activo);
@@ -770,6 +783,274 @@ async function guardarPago(cuotaId) {
     renderCurrentView();
   } catch (e) {
     document.getElementById("form-error").innerHTML = `<div class="error-msg">${e.message}</div>`;
+  }
+}
+
+// ---------------------------------------------------------------------
+// EMPEÑOS (dinero prestado bajo prenda — aparte de los préstamos, este
+// dinero nunca se mezcla con el de arriba: tiene su propia tabla, su
+// propia ruta de API y su propia pantalla).
+// ---------------------------------------------------------------------
+async function viewEmpenos() {
+  const [empenos, resumen] = await Promise.all([
+    api("/empenos"),
+    api("/empenos/reportes/resumen"),
+  ]);
+  const activos = empenos.filter((e) => e.estado === "activo");
+  const historial = empenos.filter((e) => e.estado !== "activo");
+
+  return `
+    ${topbar("Empeños")}
+    <main class="view">
+      <div class="cards-grid">
+        <div class="stat-card accent">
+          <div class="label">Capital en empeños</div>
+          <div class="value">${money(resumen.capitalActivo)}</div>
+        </div>
+        <div class="stat-card ${resumen.atrasados > 0 ? "warn" : ""}">
+          <div class="label">Atrasados</div>
+          <div class="value">${resumen.atrasados}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Empeños activos</div>
+          <div class="value">${resumen.empenosActivos}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Interés cobrado</div>
+          <div class="value">${money(resumen.interesCobradoHistorico)}</div>
+        </div>
+      </div>
+
+      <p class="muted" style="font-size:12px;margin:2px 0 14px;">Este dinero es aparte de los préstamos: aquí solo se cobra el interés mensual fijo por guardar la prenda. El valor de la prenda se paga completo cuando el cliente la rescata.</p>
+
+      <div class="section-title"><span>Activos (${activos.length})</span></div>
+      ${
+        activos.length === 0
+          ? `<div class="empty-state"><div class="icon">🪙</div><p>Todavía no tienes empeños activos</p></div>`
+          : activos.map(empenoListItem).join("")
+      }
+
+      ${
+        historial.length
+          ? `<div class="section-title"><span>Historial</span></div>` + historial.map(empenoListItem).join("")
+          : ""
+      }
+    </main>
+    <button class="fab" onclick="abrirNuevoEmpeno()">${ICONS.plus}</button>
+  `;
+}
+
+function empenoListItem(e) {
+  const estado = e.estado === "activo" && e.atrasado ? "atrasada" : e.estado;
+  const estadoTexto =
+    e.estado === "activo" ? (e.atrasado ? "Atrasado" : "Activo") : e.estado === "pagado" ? "Pagado" : "Cancelado";
+  return `
+    <div class="list-item" onclick="go('empeno-detalle', {id: ${e.id}})">
+      <div class="info">
+        <div class="title">${escapeHtml(e.descripcion)}</div>
+        <div class="subtitle">${escapeHtml(e.cliente_nombre)} · interés ${money(e.interes_mensual)}/mes${
+          e.estado === "activo" ? " · vence " + fechaCorta(e.fecha_proximo_pago) : ""
+        }</div>
+      </div>
+      <div style="text-align:right;">
+        <div class="amount">${money(e.valor)}</div>
+        <span class="badge ${estado}">${estadoTexto}</span>
+      </div>
+    </div>
+  `;
+}
+
+async function abrirNuevoEmpeno() {
+  const clientes = state.cache.clientes || (await api("/clientes"));
+  state.cache.clientes = clientes;
+
+  if (clientes.length === 0) {
+    openSheet(`
+      <h3>Nuevo empeño</h3>
+      <div class="empty-state">
+        <div class="icon">👤</div>
+        <p>Todavía no tienes ningún cliente. Crea uno primero y luego podrás registrarle un empeño.</p>
+      </div>
+      <button class="btn btn-primary btn-block" onclick="closeSheet(); go('clientes'); setTimeout(abrirNuevoCliente, 150);">+ Crear cliente</button>
+    `);
+    return;
+  }
+
+  openSheet(`
+    <h3>Nuevo empeño</h3>
+    <div id="form-error"></div>
+    <div class="field">
+      <label>Cliente *</label>
+      <select id="ne-cliente">
+        ${clientes.map((c) => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join("")}
+      </select>
+    </div>
+    <div class="field"><label>¿Qué dejó empeñado? *</label><input id="ne-descripcion" placeholder="Ej. Cadena de oro, TV 42 pulgadas..." required /></div>
+    <div class="row-2">
+      <div class="field"><label>Valor de la prenda *</label><input id="ne-valor" type="number" min="0.01" step="0.01" required /></div>
+      <div class="field"><label>Interés mensual *</label><input id="ne-interes" type="number" min="0.01" step="0.01" required /></div>
+    </div>
+    <p class="muted" style="font-size:12px;margin:-6px 0 0;">El interés es un valor fijo en pesos que el cliente paga cada mes para mantener la prenda (no se calcula como porcentaje).</p>
+    <div class="field"><label>Fecha de inicio *</label><input id="ne-fecha" type="date" value="${hoyISO()}" required /></div>
+    <div class="field"><label>Notas</label><textarea id="ne-notas" rows="2"></textarea></div>
+    <button class="btn btn-primary btn-block" onclick="guardarEmpeno()">Guardar empeño</button>
+  `);
+}
+
+async function guardarEmpeno() {
+  const cliente_id = document.getElementById("ne-cliente").value;
+  const descripcion = document.getElementById("ne-descripcion").value.trim();
+  const valor = parseFloat(document.getElementById("ne-valor").value);
+  const interes_mensual = parseFloat(document.getElementById("ne-interes").value);
+  const fecha_inicio = document.getElementById("ne-fecha").value;
+  const notas = document.getElementById("ne-notas").value.trim();
+
+  if (!cliente_id || !descripcion || !valor || !interes_mensual || !fecha_inicio) {
+    document.getElementById("form-error").innerHTML = `<div class="error-msg">Completa todos los campos obligatorios (*)</div>`;
+    return;
+  }
+  try {
+    await api("/empenos", {
+      method: "POST",
+      body: { cliente_id, descripcion, valor, interes_mensual, fecha_inicio, notas },
+    });
+    closeSheet();
+    toast("Empeño guardado", "success");
+    go("empenos");
+  } catch (e) {
+    document.getElementById("form-error").innerHTML = `<div class="error-msg">${e.message}</div>`;
+  }
+}
+
+async function viewEmpenoDetalle(id) {
+  const e = await api(`/empenos/${id}`);
+  const estado = e.estado === "activo" && e.atrasado ? "atrasada" : e.estado;
+  const estadoTexto =
+    e.estado === "activo" ? (e.atrasado ? "Atrasado" : "Activo") : e.estado === "pagado" ? "Pagado" : "Cancelado";
+
+  return `
+    ${topbar("Empeño", "empenos")}
+    <main class="view">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div class="title" style="font-size:17px;font-weight:700;">${escapeHtml(e.descripcion)}</div>
+            <div class="subtitle muted">${escapeHtml(e.cliente_nombre)}${e.telefono ? " · " + escapeHtml(e.telefono) : ""}</div>
+          </div>
+          <span class="badge ${estado}">${estadoTexto}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:10px 0 4px;">
+          <span class="muted">Valor de la prenda</span><b>${money(e.valor)}</b>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0;">
+          <span class="muted">Interés mensual</span><b>${money(e.interes_mensual)}</b>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0;">
+          <span class="muted">Empeñado desde</span><b>${fechaCorta(e.fecha_inicio)}</b>
+        </div>
+        ${
+          e.estado === "activo"
+            ? `<div style="display:flex;justify-content:space-between;padding:4px 0;">
+                <span class="muted">Próximo pago de interés</span><b>${fechaCorta(e.fecha_proximo_pago)}</b>
+              </div>`
+            : ""
+        }
+        ${e.notas ? `<div style="padding:4px 0;"><span class="muted">Notas:</span> ${escapeHtml(e.notas)}</div>` : ""}
+      </div>
+
+      ${
+        e.estado === "activo"
+          ? `
+            <button class="btn btn-primary btn-block" onclick="abrirPagoInteresEmpeno(${e.id}, ${e.interes_mensual})">Registrar pago de interés</button>
+            <button class="btn btn-secondary btn-block" style="margin-top:10px;" onclick="rescatarEmpeno(${e.id})">Rescatar prenda (pagar todo)</button>
+            <button class="btn btn-danger btn-block" style="margin-top:10px;" onclick="cancelarEmpeno(${e.id})">Cancelar (prenda perdida)</button>
+          `
+          : ""
+      }
+
+      <div class="section-title"><span>Historial de pagos</span></div>
+      ${
+        e.pagos.length === 0
+          ? `<p class="muted">Todavía no hay pagos registrados</p>`
+          : e.pagos
+              .map(
+                (p) => `
+            <div class="list-item">
+              <div class="info">
+                <div class="title">${p.tipo === "interes" ? "Pago de interés" : "Rescate de la prenda"}</div>
+                <div class="subtitle">${fechaCorta(p.fecha)}${p.notas ? " · " + escapeHtml(p.notas) : ""}</div>
+              </div>
+              <div style="text-align:right;">
+                <div class="amount ok">${money(p.valor)}</div>
+                <button class="btn-edit-fecha" title="Deshacer pago" onclick="deshacerPagoEmpeno(${p.id})">↩️</button>
+              </div>
+            </div>
+          `
+              )
+              .join("")
+      }
+    </main>
+  `;
+}
+
+function abrirPagoInteresEmpeno(empenoId, interesMensual) {
+  openSheet(`
+    <h3>Pago de interés</h3>
+    <div id="form-error"></div>
+    <p class="muted" style="margin-top:-8px;">Interés mensual de este empeño: <b>${money(interesMensual)}</b></p>
+    <div class="field"><label>Valor a pagar</label><input id="pie-valor" type="number" min="0.01" step="0.01" value="${interesMensual}" /></div>
+    <div class="field"><label>Notas (opcional)</label><input id="pie-notas" /></div>
+    <button class="btn btn-primary btn-block" onclick="guardarPagoInteresEmpeno(${empenoId})">Confirmar pago</button>
+  `);
+}
+
+async function guardarPagoInteresEmpeno(empenoId) {
+  const valor = parseFloat(document.getElementById("pie-valor").value);
+  const notas = document.getElementById("pie-notas").value.trim();
+  if (!valor || valor <= 0) {
+    document.getElementById("form-error").innerHTML = `<div class="error-msg">Ingresa un valor válido</div>`;
+    return;
+  }
+  try {
+    await api(`/empenos/${empenoId}/pago-interes`, { method: "POST", body: { valor, notas } });
+    closeSheet();
+    toast("Pago de interés registrado", "success");
+    renderCurrentView();
+  } catch (e) {
+    document.getElementById("form-error").innerHTML = `<div class="error-msg">${e.message}</div>`;
+  }
+}
+
+async function rescatarEmpeno(id) {
+  if (!confirm("¿Confirmas que el cliente pagó el valor completo de la prenda y se la lleva? No se cobrará el interés de este mes.")) return;
+  try {
+    await api(`/empenos/${id}/rescatar`, { method: "POST" });
+    toast("Prenda rescatada", "success");
+    renderCurrentView();
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+async function cancelarEmpeno(id) {
+  if (!confirm("¿Seguro que quieres cancelar este empeño? Se marcará como que la prenda se perdió o se remató.")) return;
+  try {
+    await api(`/empenos/${id}/cancelar`, { method: "PUT" });
+    toast("Empeño cancelado");
+    renderCurrentView();
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+async function deshacerPagoEmpeno(pagoId) {
+  if (!confirm("¿Deshacer este pago? Se eliminará del historial y se ajustará la fecha o el estado del empeño.")) return;
+  try {
+    await api(`/empenos/pagos/${pagoId}`, { method: "DELETE" });
+    toast("Pago deshecho");
+    renderCurrentView();
+  } catch (e) {
+    toast(e.message, "error");
   }
 }
 

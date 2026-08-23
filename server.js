@@ -21,6 +21,7 @@ const prestamosRoutes = require("./routes/prestamos");
 const pagosRoutes = require("./routes/pagos");
 const reportesRoutes = require("./routes/reportes");
 const sistemaRoutes = require("./routes/sistema");
+const empenosRoutes = require("./routes/empenos");
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.use("/api/prestamos", prestamosRoutes);
 app.use("/api/pagos", pagosRoutes);
 app.use("/api/reportes", reportesRoutes);
 app.use("/api/sistema", sistemaRoutes);
+app.use("/api/empenos", empenosRoutes);
 
 // Archivos estáticos del frontend (PWA)
 app.use(express.static(path.join(__dirname, "public")));
