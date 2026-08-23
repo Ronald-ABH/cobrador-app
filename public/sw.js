@@ -4,7 +4,7 @@
 // como respaldo por si algún día no hay conexión — NUNCA como primera
 // opción, para que las actualizaciones de la app siempre se vean al
 // instante.
-const CACHE = "cobrador-app-v2";
+const CACHE = "cobrador-app-v3";
 const ARCHIVOS = [
   "/",
   "/index.html",
