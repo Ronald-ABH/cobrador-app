@@ -14,8 +14,9 @@ prestamistas independientes, cobradiarios y pagadiarios.
 - Registro de pagos (incluye pagos parciales), detección de mora.
 - Agenda del día: qué cuotas cobrar hoy, filtrable por ruta.
 - Reportes: cartera, mora, recaudo diario, ganancia proyectada.
-- Copia de seguridad automática **todos los días por correo**, con la base de
-  datos completa adjunta (y también en un archivo de texto legible).
+- Copia de seguridad automática **todos los días por correo** (usando
+  [Resend](https://resend.com)), con la base de datos completa adjunta (y
+  también en un archivo de texto legible).
 - Instalable en el celular como una app (PWA): ícono en la pantalla de
   inicio, pantalla completa, sin barra del navegador.
 - Los datos se guardan en un archivo de base de datos (SQLite) que vive en
@@ -27,20 +28,24 @@ Vas a necesitar dos cosas gratuitas:
 
 1. Una cuenta en **[Railway](https://railway.app)** (recomendado para que el
    servidor esté siempre activo, sin dormirse).
-2. Una cuenta de **Gmail** que usarás solo para *enviar* las copias de
-   seguridad (puede ser una que ya tengas).
+2. Una cuenta en **[Resend](https://resend.com)**, que es el servicio que se
+   usa para *enviar* las copias de seguridad por correo. Se eligió Resend en
+   vez de Gmail/SMTP porque Railway (y proveedores similares) bloquean las
+   conexiones SMTP salientes en sus planes básicos; Resend envía el correo
+   por HTTPS normal, así que no depende de puertos de correo que puedan estar
+   bloqueados.
 
-## 2. Generar la "contraseña de aplicación" de Gmail (para el backup)
+## 2. Obtener la clave de la API de Resend (para el backup)
 
-Gmail no permite usar tu contraseña normal desde una app externa, así que
-hay que crear una contraseña especial:
-
-1. Entra a tu cuenta de Gmail → activa la **verificación en dos pasos** si no
-   la tienes (Configuración de la cuenta de Google → Seguridad).
-2. Ve a **myaccount.google.com/apppasswords**.
-3. Crea una nueva contraseña de aplicación (ponle de nombre "Cobrador App").
-4. Google te va a mostrar un código de 16 letras. Cópialo, lo vas a necesitar
-   en el paso 4.
+1. Crea una cuenta gratis en [resend.com](https://resend.com) (el plan
+   gratuito alcanza de sobra para un correo diario).
+2. Ve a **API Keys → Create API Key** y copia la clave que te muestra
+   (empieza con `re_`). La vas a necesitar en el paso 4.
+3. Por defecto, el backup se envía desde `onboarding@resend.dev` (un remitente
+   de prueba que ya viene habilitado, sin configuración extra). Si más
+   adelante quieres que el correo llegue desde tu propio dominio, en Resend
+   puedes verificar un dominio y luego poner esa dirección en la variable de
+   entorno `RESEND_FROM` (paso 4).
 
 ## 3. Subir el proyecto a GitHub
 
@@ -66,10 +71,12 @@ Railway despliega desde un repositorio de GitHub.
    | `JWT_SECRET` | una frase larga y única que inventes |
    | `ADMIN_USERNAME` | el usuario con el que vas a entrar (ej. `papa`) |
    | `ADMIN_PASSWORD` | la contraseña inicial (cámbiala luego desde Ajustes) |
-   | `BACKUP_EMAIL_FROM` | tu correo de Gmail que envía el backup |
-   | `BACKUP_EMAIL_APP_PASSWORD` | el código de 16 letras del paso 2 |
+   | `RESEND_API_KEY` | la clave `re_...` del paso 2 |
    | `BACKUP_EMAIL_TO` | `ronaldbarrios31peluqueria@gmail.com` |
    | `DATA_DIR` | `/data` |
+
+   Opcional: `RESEND_FROM` si verificaste tu propio dominio en Resend (si no
+   la configuras, se usa el remitente de prueba `onboarding@resend.dev`).
 
    `PORT` no hace falta configurarlo, Railway lo asigna solo.
 

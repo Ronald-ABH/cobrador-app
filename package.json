@@ -4,11 +4,11 @@
   "description": "App web/PWA para gestión de préstamos, cobranza y rutas de cobro",
   "main": "server.js",
   "scripts": {
-    "start": "node --experimental-sqlite server.js",
-    "dev": "node --experimental-sqlite server.js"
+    "start": "node server.js",
+    "dev": "node server.js"
   },
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.13.0"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -17,7 +17,6 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
-    "node-cron": "^3.0.3",
-    "nodemailer": "^6.9.14"
+    "node-cron": "^4.6.0"
   }
 }
