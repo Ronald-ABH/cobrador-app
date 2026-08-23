@@ -378,15 +378,21 @@ async function viewAgenda() {
     api("/rutas"),
   ]);
 
+  // El filtro por ruta solo tiene sentido si ya existe al menos una ruta
+  // creada (Ajustes → Rutas de cobro). Mientras no la usen, no se muestra
+  // un select vacío que no hace nada; en cuanto creen la primera ruta,
+  // este filtro reaparece solo, sin tocar nada de código.
   const filtros = `<option value="">Todas las rutas</option>` +
     rutas.map((r) => `<option value="${r.id}" ${String(r.id) === String(rutaId) ? "selected" : ""}>${escapeHtml(r.nombre)}</option>`).join("");
 
   return `
     ${topbar("Agenda de cobro")}
     <main class="view">
-      <div class="field">
-        <select onchange="go('agenda', {ruta_id: this.value})">${filtros}</select>
-      </div>
+      ${
+        rutas.length > 0
+          ? `<div class="field"><select onchange="go('agenda', {ruta_id: this.value})">${filtros}</select></div>`
+          : ""
+      }
       ${
         agenda.length === 0
           ? `<div class="empty-state"><div class="icon">✅</div><p>No hay cuotas pendientes${rutaId ? " en esta ruta" : ""}</p></div>`
