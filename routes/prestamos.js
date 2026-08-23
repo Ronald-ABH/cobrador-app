@@ -42,17 +42,43 @@ router.post("/", (req, res) => {
   if (!cliente_id || !monto || tasa_interes === undefined || !num_cuotas || !fecha_inicio) {
     return res.status(400).json({ error: "Faltan datos obligatorios del préstamo" });
   }
+
+  // Antes, un valor mal formado (texto, negativo, vacío) llegaba tal cual a
+  // generarCuotas() y producía cuotas con NaN que igual se guardaban en la
+  // base de datos. Se valida explícitamente cada número antes de calcular
+  // nada.
+  const montoNum = Number(monto);
+  const tasaNum = Number(tasa_interes);
+  const numCuotasNum = Number(num_cuotas);
+  const cliente = db.prepare("SELECT id FROM clientes WHERE id = ?").get(cliente_id);
+
+  if (!cliente) {
+    return res.status(400).json({ error: "El cliente no existe" });
+  }
+  if (!Number.isFinite(montoNum) || montoNum <= 0) {
+    return res.status(400).json({ error: "El monto prestado debe ser un número mayor que cero" });
+  }
+  if (!Number.isFinite(tasaNum) || tasaNum < 0) {
+    return res.status(400).json({ error: "La tasa de interés debe ser un número mayor o igual a cero" });
+  }
+  if (!Number.isInteger(numCuotasNum) || numCuotasNum < 1) {
+    return res.status(400).json({ error: "El número de cuotas debe ser un entero mayor o igual a uno" });
+  }
+  if (Number.isNaN(new Date(fecha_inicio + "T00:00:00").getTime())) {
+    return res.status(400).json({ error: "La fecha de inicio no es válida" });
+  }
+
   const tipo = ["fijo", "saldo", "capitalizado"].includes(tipo_interes) ? tipo_interes : "fijo";
   const frec = ["diario", "semanal", "quincenal", "mensual"].includes(frecuencia)
     ? frecuencia
     : "diario";
 
   const { valor_cuota, total_pagar, cuotas } = generarCuotas({
-    monto: Number(monto),
-    tasa: Number(tasa_interes),
+    monto: montoNum,
+    tasa: tasaNum,
     tipo,
     frecuencia: frec,
-    num_cuotas: Number(num_cuotas),
+    num_cuotas: numCuotasNum,
     fecha_inicio,
   });
 
@@ -68,11 +94,11 @@ router.post("/", (req, res) => {
   const tx = db.transaction(() => {
     const info = insertPrestamo.run(
       cliente_id,
-      monto,
-      tasa_interes,
+      montoNum,
+      tasaNum,
       tipo,
       frec,
-      num_cuotas,
+      numCuotasNum,
       fecha_inicio,
       valor_cuota,
       total_pagar,
