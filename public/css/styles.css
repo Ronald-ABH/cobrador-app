@@ -421,6 +421,41 @@ main.view {
   color: var(--text);
 }
 
+.stat-card .sublabel {
+  font-size: 11.5px;
+  color: var(--danger);
+  opacity: 0.85;
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+/* ---------- Accesos rápidos (inicio) ---------- */
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.quick-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  background: linear-gradient(165deg, var(--surface-2), var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 13px 6px 11px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+  transition: transform 0.1s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.quick-action svg { width: 20px; height: 20px; color: var(--gold); }
+.quick-action:active { transform: scale(0.96); border-color: var(--border-strong); }
+.quick-action:hover { color: var(--text); }
+
 .stat-card.accent { background: linear-gradient(165deg, var(--gold-bright), var(--gold)); border-color: transparent; }
 .stat-card.accent::before { display: none; }
 .stat-card.accent .label { color: rgba(36, 28, 15, 0.65); }

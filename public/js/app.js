@@ -128,6 +128,7 @@ const ICONS = {
   ajustes: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>`,
   back: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`,
   plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`,
+  ruta: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5V13a4 4 0 0 0 4 4h2a4 4 0 0 1 4 4"/></svg>`,
 };
 
 // ---------------------------------------------------------------------
@@ -285,10 +286,17 @@ async function viewDashboard() {
   ]);
   const atrasadas = agenda.filter((a) => a.atrasada).length;
   const hoyPendientes = agenda.length;
+  const clientesEnMora = new Set(agenda.filter((a) => a.atrasada).map((a) => a.cliente_id)).size;
 
   return `
     ${topbar("Hola 👋")}
     <main class="view">
+      <div class="quick-actions">
+        <button class="quick-action" onclick="abrirNuevoCliente()">${ICONS.clientes}<span>Cliente</span></button>
+        <button class="quick-action" onclick="abrirNuevoPrestamo()">${ICONS.plus}<span>Préstamo</span></button>
+        <button class="quick-action" onclick="go('rutas')">${ICONS.ruta}<span>Rutas</span></button>
+      </div>
+
       <div class="cards-grid">
         <div class="stat-card accent">
           <div class="label">Recaudado hoy</div>
@@ -297,6 +305,7 @@ async function viewDashboard() {
         <div class="stat-card ${resumen.moraTotal > 0 ? "warn" : ""}">
           <div class="label">En mora</div>
           <div class="value">${money(resumen.moraTotal)}</div>
+          ${clientesEnMora > 0 ? `<div class="sublabel">${clientesEnMora} cliente${clientesEnMora === 1 ? "" : "s"}</div>` : ""}
         </div>
         <div class="stat-card">
           <div class="label">Cartera por cobrar</div>
