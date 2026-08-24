@@ -23,6 +23,52 @@ function money(n) {
   return "$" + v.toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// ---------------------------------------------------------------------
+// Puntos de miles al escribir en campos numéricos (monto, valor, etc.)
+// Un <input type="number"> del navegador no permite mostrar "1.000.000"
+// mientras se escribe (solo acepta dígitos y un punto decimal), así que
+// estos campos usan type="text" + esta lógica para dar formato en vivo,
+// igual que se ve el dinero en el resto de la app: puntos para los miles,
+// coma para los decimales.
+function formatearNumero(valorCrudo) {
+  let [entero, decimal] = (valorCrudo || "").split(",");
+  entero = (entero || "").replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+  entero = entero.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  if (decimal !== undefined) {
+    decimal = decimal.replace(/\D/g, "").slice(0, 2);
+    return entero + "," + decimal;
+  }
+  return entero;
+}
+
+// Convierte lo que el usuario ve ("1.234.567,89") al número real que hay
+// que enviarle al servidor (1234567.89).
+function desformatearNumero(valorFormateado) {
+  if (!valorFormateado) return NaN;
+  return parseFloat(valorFormateado.replace(/\./g, "").replace(",", "."));
+}
+
+// Formatea un número (que viene de la base de datos) para dejarlo ya listo
+// dentro de un campo editable — sin ",00" de más si es un número entero.
+function formatearParaInput(numero) {
+  const n = Number(numero);
+  if (!Number.isFinite(n)) return "";
+  const tieneDecimales = Math.abs(n % 1) > 0.001;
+  const texto = n.toFixed(tieneDecimales ? 2 : 0).replace(".", ",");
+  return formatearNumero(texto);
+}
+
+// Handler de oninput para esos campos: reformatea el texto y trata de
+// mantener el cursor en un punto razonable (contando desde el final, que es
+// donde casi siempre se está escribiendo o borrando).
+function manejarInputMiles(ev) {
+  const el = ev.target;
+  const distanciaDesdeElFinal = el.value.length - el.selectionStart;
+  el.value = formatearNumero(el.value);
+  const nuevaPos = Math.max(0, el.value.length - distanciaDesdeElFinal);
+  el.setSelectionRange(nuevaPos, nuevaPos);
+}
+
 function fechaCorta(fecha) {
   if (!fecha) return "-";
   // Las fechas simples (YYYY-MM-DD) se interpretan como medianoche local.
@@ -473,12 +519,24 @@ function aplicarFiltrosClientes(clientes, { q, ruta_id, estado }) {
   if (ruta_id) {
     filtrados = filtrados.filter((c) => String(c.ruta_id) === String(ruta_id));
   }
+  // "En mora" es SOLO el que tiene cuotas ya vencidas sin pagar. Un cliente
+  // con un préstamo activo pero que va pagando a tiempo (todavía no le
+  // vence nada) no está en mora — está "Activo" — aunque técnicamente
+  // todavía deba plata (las cuotas futuras). Antes se mezclaban los dos.
   if (estado === "mora") {
-    filtrados = filtrados.filter((c) => c.deuda_pendiente > 0);
+    filtrados = filtrados.filter((c) => c.deuda_atrasada > 0);
+  } else if (estado === "activo") {
+    filtrados = filtrados.filter((c) => c.deuda_pendiente > 0 && !(c.deuda_atrasada > 0));
   } else if (estado === "al_dia") {
     filtrados = filtrados.filter((c) => c.deuda_pendiente <= 0);
   }
   return filtrados;
+}
+
+function estadoClienteBadge(c) {
+  if (c.deuda_atrasada > 0) return `<span class="badge atrasada">En mora</span>`;
+  if (c.deuda_pendiente > 0) return `<span class="badge activo">Activo</span>`;
+  return "";
 }
 
 function renderListaClientes(filtrados, totalClientes) {
@@ -490,6 +548,7 @@ function renderListaClientes(filtrados, totalClientes) {
           <div class="info">
             <div class="title">${escapeHtml(c.nombre)}</div>
             <div class="subtitle">${escapeHtml(c.ruta_nombre) || "Sin ruta"} ${c.telefono ? "· " + escapeHtml(c.telefono) : ""}</div>
+            ${estadoClienteBadge(c)}
           </div>
           <div class="amount ${c.deuda_pendiente > 0 ? "debt" : "ok"}">${c.deuda_pendiente > 0 ? money(c.deuda_pendiente) : "Al día"}</div>
         </div>
@@ -507,7 +566,7 @@ async function viewClientes() {
 
   const filtrados = aplicarFiltrosClientes(clientes, { q, ruta_id: rutaId, estado: estadoFiltro });
 
-  const enMora = clientes.filter((c) => c.deuda_pendiente > 0).length;
+  const enMora = clientes.filter((c) => c.deuda_atrasada > 0).length;
   const carteraTotal = clientes.reduce((s, c) => s + c.deuda_pendiente, 0);
 
   return `
@@ -545,7 +604,8 @@ async function viewClientes() {
         <select id="cf-estado" onchange="filtrarClientes()">
           <option value="" ${!estadoFiltro ? "selected" : ""}>Todos los estados</option>
           <option value="mora" ${estadoFiltro === "mora" ? "selected" : ""}>En mora</option>
-          <option value="al_dia" ${estadoFiltro === "al_dia" ? "selected" : ""}>Al día</option>
+          <option value="activo" ${estadoFiltro === "activo" ? "selected" : ""}>Activos (al corriente)</option>
+          <option value="al_dia" ${estadoFiltro === "al_dia" ? "selected" : ""}>Al día (sin deuda)</option>
         </select>
       </div>
 
@@ -795,8 +855,8 @@ async function abrirNuevoPrestamo(clienteIdPreseleccionado) {
       </select>
     </div>
     <div class="row-2">
-      <div class="field"><label>Monto prestado *</label><input id="np-monto" type="number" min="0" step="0.01" required /></div>
-      <div class="field"><label>Tasa de interés (%) *</label><input id="np-tasa" type="number" min="0" step="0.01" required /></div>
+      <div class="field"><label>Monto prestado *</label><input id="np-monto" type="text" inputmode="decimal" oninput="manejarInputMiles(event)" required /></div>
+      <div class="field"><label>Tasa de interés (%) *</label><input id="np-tasa" type="text" inputmode="decimal" oninput="manejarInputMiles(event)" required /></div>
     </div>
     <div class="field">
       <label>Tipo de interés</label>
@@ -817,7 +877,7 @@ async function abrirNuevoPrestamo(clienteIdPreseleccionado) {
           <option value="mensual">Mensual</option>
         </select>
       </div>
-      <div class="field"><label>Número de cuotas *</label><input id="np-cuotas" type="number" min="1" step="1" required /></div>
+      <div class="field"><label>Número de cuotas *</label><input id="np-cuotas" type="text" inputmode="numeric" oninput="manejarInputMiles(event)" required /></div>
     </div>
     <div class="field"><label>Fecha de inicio *</label><input id="np-fecha" type="date" value="${hoyISO()}" required /></div>
     <div class="field"><label>Notas</label><textarea id="np-notas" rows="2"></textarea></div>
@@ -828,11 +888,11 @@ async function abrirNuevoPrestamo(clienteIdPreseleccionado) {
 
 async function guardarPrestamo() {
   const cliente_id = document.getElementById("np-cliente").value;
-  const monto = parseFloat(document.getElementById("np-monto").value);
-  const tasa_interes = parseFloat(document.getElementById("np-tasa").value);
+  const monto = desformatearNumero(document.getElementById("np-monto").value);
+  const tasa_interes = desformatearNumero(document.getElementById("np-tasa").value);
   const tipo_interes = document.getElementById("np-tipo").value;
   const frecuencia = document.getElementById("np-frecuencia").value;
-  const num_cuotas = parseInt(document.getElementById("np-cuotas").value, 10);
+  const num_cuotas = parseInt(desformatearNumero(document.getElementById("np-cuotas").value), 10);
   const fecha_inicio = document.getElementById("np-fecha").value;
   const notas = document.getElementById("np-notas").value.trim();
 
@@ -951,14 +1011,14 @@ function abrirRegistrarPago(cuotaId, pendiente, nombreCliente) {
     <h3>Registrar pago ${nombreCliente ? "· " + nombreCliente : ""}</h3>
     <div id="form-error"></div>
     <p class="muted" style="margin-top:-8px;">Saldo pendiente de esta cuota: <b>${money(pendiente)}</b></p>
-    <div class="field"><label>Valor a pagar</label><input id="pg-valor" type="number" min="0.01" step="0.01" value="${pendiente}" /></div>
+    <div class="field"><label>Valor a pagar</label><input id="pg-valor" type="text" inputmode="decimal" oninput="manejarInputMiles(event)" value="${formatearParaInput(pendiente)}" /></div>
     <div class="field"><label>Notas (opcional)</label><input id="pg-notas" /></div>
     <button class="btn btn-primary btn-block" onclick="guardarPago(${cuotaId})">Confirmar pago</button>
   `);
 }
 
 async function guardarPago(cuotaId) {
-  const valor = parseFloat(document.getElementById("pg-valor").value);
+  const valor = desformatearNumero(document.getElementById("pg-valor").value);
   const notas = document.getElementById("pg-notas").value.trim();
   if (!valor || valor <= 0) {
     document.getElementById("form-error").innerHTML = `<div class="error-msg">Ingresa un valor válido</div>`;
@@ -1076,8 +1136,8 @@ async function abrirNuevoEmpeno(clienteIdPreseleccionado) {
     </div>
     <div class="field"><label>¿Qué dejó empeñado? *</label><input id="ne-descripcion" placeholder="Ej. Cadena de oro, TV 42 pulgadas..." required /></div>
     <div class="row-2">
-      <div class="field"><label>Valor de la prenda *</label><input id="ne-valor" type="number" min="0.01" step="0.01" required /></div>
-      <div class="field"><label>Interés mensual *</label><input id="ne-interes" type="number" min="0.01" step="0.01" required /></div>
+      <div class="field"><label>Valor de la prenda *</label><input id="ne-valor" type="text" inputmode="decimal" oninput="manejarInputMiles(event)" required /></div>
+      <div class="field"><label>Interés mensual *</label><input id="ne-interes" type="text" inputmode="decimal" oninput="manejarInputMiles(event)" required /></div>
     </div>
     <p class="muted" style="font-size:12px;margin:-6px 0 0;">El interés es un valor fijo en pesos que el cliente paga cada mes para mantener la prenda (no se calcula como porcentaje).</p>
     <div class="field"><label>Fecha de inicio *</label><input id="ne-fecha" type="date" value="${hoyISO()}" required /></div>
@@ -1089,8 +1149,8 @@ async function abrirNuevoEmpeno(clienteIdPreseleccionado) {
 async function guardarEmpeno() {
   const cliente_id = document.getElementById("ne-cliente").value;
   const descripcion = document.getElementById("ne-descripcion").value.trim();
-  const valor = parseFloat(document.getElementById("ne-valor").value);
-  const interes_mensual = parseFloat(document.getElementById("ne-interes").value);
+  const valor = desformatearNumero(document.getElementById("ne-valor").value);
+  const interes_mensual = desformatearNumero(document.getElementById("ne-interes").value);
   const fecha_inicio = document.getElementById("ne-fecha").value;
   const notas = document.getElementById("ne-notas").value.trim();
 
@@ -1187,14 +1247,14 @@ function abrirPagoInteresEmpeno(empenoId, interesMensual) {
     <h3>Pago de interés</h3>
     <div id="form-error"></div>
     <p class="muted" style="margin-top:-8px;">Interés mensual de este empeño: <b>${money(interesMensual)}</b></p>
-    <div class="field"><label>Valor a pagar</label><input id="pie-valor" type="number" min="0.01" step="0.01" value="${interesMensual}" /></div>
+    <div class="field"><label>Valor a pagar</label><input id="pie-valor" type="text" inputmode="decimal" oninput="manejarInputMiles(event)" value="${formatearParaInput(interesMensual)}" /></div>
     <div class="field"><label>Notas (opcional)</label><input id="pie-notas" /></div>
     <button class="btn btn-primary btn-block" onclick="guardarPagoInteresEmpeno(${empenoId})">Confirmar pago</button>
   `);
 }
 
 async function guardarPagoInteresEmpeno(empenoId) {
-  const valor = parseFloat(document.getElementById("pie-valor").value);
+  const valor = desformatearNumero(document.getElementById("pie-valor").value);
   const notas = document.getElementById("pie-notas").value.trim();
   if (!valor || valor <= 0) {
     document.getElementById("form-error").innerHTML = `<div class="error-msg">Ingresa un valor válido</div>`;

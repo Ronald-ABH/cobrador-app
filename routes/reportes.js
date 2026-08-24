@@ -69,15 +69,28 @@ router.get("/resumen", (req, res) => {
     )
     .get().v;
 
-  const totalPagarProyectado = db
+  // "Ganancia proyectada" = lo que TODAVÍA falta por ganar, no el interés
+  // de la vida entera del préstamo. De cada préstamo activo se separa qué
+  // porción de su total a pagar es interés (total_pagar - monto, sobre
+  // total_pagar) y esa misma proporción se le aplica a lo que le queda
+  // pendiente de cobrar a ese préstamo — así un préstamo casi pagado ya no
+  // "proyecta" la ganancia que ya se cobró hace tiempo, solo la que falta.
+  const gananciaProyectada = db
     .prepare(
-      `SELECT COALESCE(SUM(p.total_pagar),0) AS v
-       FROM prestamos p JOIN clientes c ON c.id = p.cliente_id
-       WHERE p.estado != 'cancelado' AND c.activo = 1`
+      `SELECT p.monto, p.total_pagar,
+              COALESCE(SUM(cu.valor - cu.valor_pagado), 0) AS pendiente
+       FROM prestamos p
+       JOIN clientes c ON c.id = p.cliente_id
+       LEFT JOIN cuotas cu ON cu.prestamo_id = p.id AND cu.estado != 'pagada'
+       WHERE p.estado = 'activo' AND c.activo = 1
+       GROUP BY p.id`
     )
-    .get().v;
-
-  const gananciaProyectada = totalPagarProyectado - totalPrestado;
+    .all()
+    .reduce((total, p) => {
+      if (!p.total_pagar || p.pendiente <= 0) return total;
+      const proporcionInteres = Math.max(0, (p.total_pagar - p.monto) / p.total_pagar);
+      return total + p.pendiente * proporcionInteres;
+    }, 0);
 
   const clientesActivos = db
     .prepare("SELECT COUNT(*) AS n FROM clientes WHERE activo = 1")

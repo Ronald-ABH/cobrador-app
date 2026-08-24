@@ -25,9 +25,23 @@ router.get("/", (req, res) => {
     WHERE p.cliente_id = ? AND p.estado = 'activo' AND cu.estado != 'pagada'
   `);
 
+  // Deuda que YA está atrasada (cuotas vencidas), para poder distinguir a un
+  // cliente que sigue pagando a tiempo (tiene deuda pendiente pero nada
+  // vencido: "Activo") de uno que realmente está en mora (tiene algo
+  // vencido sin pagar: "En mora"). Antes se marcaba como "en mora" a
+  // cualquiera que simplemente debiera algo, aunque estuviera pagando bien.
+  const hoy = hoyISO();
+  const deudaAtrasadaStmt = db.prepare(`
+    SELECT COALESCE(SUM(cu.valor - cu.valor_pagado), 0) AS deuda
+    FROM cuotas cu
+    JOIN prestamos p ON p.id = cu.prestamo_id
+    WHERE p.cliente_id = ? AND p.estado = 'activo' AND cu.estado != 'pagada' AND cu.fecha_vencimiento < ?
+  `);
+
   const result = clientes.map((c) => ({
     ...c,
     deuda_pendiente: deudaStmt.get(c.id).deuda,
+    deuda_atrasada: deudaAtrasadaStmt.get(c.id, hoy).deuda,
   }));
 
   res.json(result);
