@@ -212,6 +212,34 @@ a { color: inherit; }
 .field input::placeholder,
 .field textarea::placeholder { color: var(--muted); }
 
+/* Buscador de cliente (escribir el nombre en vez de desplazar un <select>
+   con cientos de opciones, muchas parecidas por los clientes importados). */
+.autocomplete-wrap { position: relative; }
+
+.autocomplete-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  z-index: 50;
+}
+
+.autocomplete-item {
+  padding: 11px 14px;
+  font-size: 14.5px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.autocomplete-item:last-child { border-bottom: none; }
+.autocomplete-item:hover,
+.autocomplete-item:active { background: rgba(205, 164, 94, 0.12); }
+
 /* ---------- Botones ---------- */
 .btn {
   display: inline-flex;

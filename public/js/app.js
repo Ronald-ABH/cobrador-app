@@ -112,6 +112,65 @@ function escapeHtml(valor) {
   })[ch]);
 }
 
+// ---------------------------------------------------------------------
+// Buscador de cliente (escribir el nombre en vez de un <select> con
+// cientos de opciones). Se usa en "Nuevo préstamo" y "Nuevo empeño", donde
+// elegir a mano en una lista larga —con varios clientes de nombres
+// parecidos, por los que se importaron de la app anterior— era incómodo.
+// ---------------------------------------------------------------------
+function selectorClienteHTML(idPrefix, clientes, clienteIdPreseleccionado) {
+  const preseleccionado = clientes.find((c) => String(c.id) === String(clienteIdPreseleccionado));
+  return `
+    <div class="autocomplete-wrap" data-prefix="${idPrefix}">
+      <input type="hidden" id="${idPrefix}-id" value="${preseleccionado ? preseleccionado.id : ""}" />
+      <input
+        id="${idPrefix}-buscar"
+        placeholder="Escribe el nombre del cliente..."
+        autocomplete="off"
+        value="${preseleccionado ? escapeHtml(preseleccionado.nombre) : ""}"
+        oninput="filtrarSelectorCliente('${idPrefix}')"
+        onfocus="filtrarSelectorCliente('${idPrefix}')"
+      />
+      <div id="${idPrefix}-resultados" class="autocomplete-list" style="display:none;"></div>
+    </div>
+  `;
+}
+
+function filtrarSelectorCliente(idPrefix) {
+  const input = document.getElementById(`${idPrefix}-buscar`);
+  const resultados = document.getElementById(`${idPrefix}-resultados`);
+  if (!input || !resultados) return;
+  const q = input.value.trim().toLowerCase();
+  const clientes = state.cache.clientes || [];
+  const coincidencias = (q ? clientes.filter((c) => c.nombre.toLowerCase().includes(q)) : clientes).slice(0, 30);
+
+  resultados.innerHTML = coincidencias.length
+    ? coincidencias
+        .map((c) => `<div class="autocomplete-item" data-id="${c.id}" data-nombre="${escapeHtml(c.nombre)}">${escapeHtml(c.nombre)}</div>`)
+        .join("")
+    : `<div class="autocomplete-item muted" style="cursor:default;">Sin resultados</div>`;
+  resultados.style.display = "block";
+}
+
+// Un solo listener para todos los buscadores de cliente de la app: elige
+// el cliente si se hizo clic en un resultado, o cierra la lista abierta si
+// se hizo clic en cualquier otro lado.
+document.addEventListener("click", (ev) => {
+  const item = ev.target.closest(".autocomplete-item[data-id]");
+  if (item) {
+    const wrap = item.closest(".autocomplete-wrap");
+    const prefix = wrap.dataset.prefix;
+    document.getElementById(`${prefix}-id`).value = item.dataset.id;
+    document.getElementById(`${prefix}-buscar`).value = item.dataset.nombre;
+    document.getElementById(`${prefix}-resultados`).style.display = "none";
+    return;
+  }
+  document.querySelectorAll(".autocomplete-list").forEach((el) => {
+    const wrap = el.closest(".autocomplete-wrap");
+    if (wrap && !wrap.contains(ev.target)) el.style.display = "none";
+  });
+});
+
 // Fecha de "hoy" en hora de Colombia (no en UTC). new Date().toISOString()
 // siempre da la fecha en UTC, así que entre las 7pm y la medianoche (hora
 // Bogotá) ya "es mañana" para UTC — eso hacía que las cuotas de mañana
@@ -882,9 +941,7 @@ async function abrirNuevoPrestamo(clienteIdPreseleccionado) {
     <div id="form-error"></div>
     <div class="field">
       <label>Cliente *</label>
-      <select id="np-cliente">
-        ${clientes.map((c) => `<option value="${c.id}" ${clienteIdPreseleccionado == c.id ? "selected" : ""}>${escapeHtml(c.nombre)}</option>`).join("")}
-      </select>
+      ${selectorClienteHTML("np-cliente", clientes, clienteIdPreseleccionado)}
     </div>
     <div class="row-2">
       <div class="field"><label>Monto prestado *</label><input id="np-monto" type="text" inputmode="decimal" oninput="manejarInputMiles(event)" required /></div>
@@ -919,7 +976,7 @@ async function abrirNuevoPrestamo(clienteIdPreseleccionado) {
 }
 
 async function guardarPrestamo() {
-  const cliente_id = document.getElementById("np-cliente").value;
+  const cliente_id = document.getElementById("np-cliente-id").value;
   const monto = desformatearNumero(document.getElementById("np-monto").value);
   const tasa_interes = desformatearNumero(document.getElementById("np-tasa").value);
   const tipo_interes = document.getElementById("np-tipo").value;
@@ -928,7 +985,11 @@ async function guardarPrestamo() {
   const fecha_inicio = document.getElementById("np-fecha").value;
   const notas = document.getElementById("np-notas").value.trim();
 
-  if (!cliente_id || !monto || isNaN(tasa_interes) || !num_cuotas || !fecha_inicio) {
+  if (!cliente_id) {
+    document.getElementById("form-error").innerHTML = `<div class="error-msg">Escribe el nombre del cliente y elígelo de la lista</div>`;
+    return;
+  }
+  if (!monto || isNaN(tasa_interes) || !num_cuotas || !fecha_inicio) {
     document.getElementById("form-error").innerHTML = `<div class="error-msg">Completa todos los campos obligatorios (*)</div>`;
     return;
   }
@@ -1200,9 +1261,7 @@ async function abrirNuevoEmpeno(clienteIdPreseleccionado) {
     <div id="form-error"></div>
     <div class="field">
       <label>Cliente *</label>
-      <select id="ne-cliente">
-        ${clientes.map((c) => `<option value="${c.id}" ${clienteIdPreseleccionado == c.id ? "selected" : ""}>${escapeHtml(c.nombre)}</option>`).join("")}
-      </select>
+      ${selectorClienteHTML("ne-cliente", clientes, clienteIdPreseleccionado)}
     </div>
     <div class="field"><label>¿Qué dejó empeñado? *</label><input id="ne-descripcion" placeholder="Ej. Cadena de oro, TV 42 pulgadas..." required /></div>
     <div class="row-2">
@@ -1217,14 +1276,18 @@ async function abrirNuevoEmpeno(clienteIdPreseleccionado) {
 }
 
 async function guardarEmpeno() {
-  const cliente_id = document.getElementById("ne-cliente").value;
+  const cliente_id = document.getElementById("ne-cliente-id").value;
   const descripcion = document.getElementById("ne-descripcion").value.trim();
   const valor = desformatearNumero(document.getElementById("ne-valor").value);
   const interes_mensual = desformatearNumero(document.getElementById("ne-interes").value);
   const fecha_inicio = document.getElementById("ne-fecha").value;
   const notas = document.getElementById("ne-notas").value.trim();
 
-  if (!cliente_id || !descripcion || !valor || !interes_mensual || !fecha_inicio) {
+  if (!cliente_id) {
+    document.getElementById("form-error").innerHTML = `<div class="error-msg">Escribe el nombre del cliente y elígelo de la lista</div>`;
+    return;
+  }
+  if (!descripcion || !valor || !interes_mensual || !fecha_inicio) {
     document.getElementById("form-error").innerHTML = `<div class="error-msg">Completa todos los campos obligatorios (*)</div>`;
     return;
   }
