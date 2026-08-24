@@ -432,23 +432,72 @@ async function viewAgenda() {
 // CLIENTES
 // ---------------------------------------------------------------------
 async function viewClientes() {
-  const clientes = await api("/clientes");
+  const [clientes, rutas] = await Promise.all([api("/clientes"), api("/rutas")]);
   state.cache.clientes = clientes;
+  state.cache.rutas = rutas;
+
   const q = (state.params.q || "").toLowerCase();
-  const filtrados = q
-    ? clientes.filter((c) => c.nombre.toLowerCase().includes(q) || (c.telefono || "").includes(q))
-    : clientes;
+  const rutaId = state.params.ruta_id || "";
+  const estadoFiltro = state.params.estado || ""; // "" | "mora" | "al_dia"
+
+  let filtrados = clientes;
+  if (q) {
+    filtrados = filtrados.filter((c) => c.nombre.toLowerCase().includes(q) || (c.telefono || "").includes(q));
+  }
+  if (rutaId) {
+    filtrados = filtrados.filter((c) => String(c.ruta_id) === String(rutaId));
+  }
+  if (estadoFiltro === "mora") {
+    filtrados = filtrados.filter((c) => c.deuda_pendiente > 0);
+  } else if (estadoFiltro === "al_dia") {
+    filtrados = filtrados.filter((c) => c.deuda_pendiente <= 0);
+  }
+
+  const enMora = clientes.filter((c) => c.deuda_pendiente > 0).length;
+  const carteraTotal = clientes.reduce((s, c) => s + c.deuda_pendiente, 0);
 
   return `
     ${topbar("Clientes")}
     <main class="view">
+      <div class="cards-grid">
+        <div class="stat-card">
+          <div class="label">Clientes activos</div>
+          <div class="value">${clientes.length}</div>
+        </div>
+        <div class="stat-card ${enMora > 0 ? "warn" : ""}">
+          <div class="label">En mora</div>
+          <div class="value">${enMora}</div>
+        </div>
+        <div class="stat-card" style="grid-column: span 2;">
+          <div class="label">Cartera pendiente</div>
+          <div class="value">${money(carteraTotal)}</div>
+        </div>
+      </div>
+
       <div class="search-bar">
         <span class="muted">🔎</span>
-        <input placeholder="Buscar cliente..." value="${state.params.q || ""}" oninput="go('clientes', {q: this.value})" />
+        <input id="cf-q" placeholder="Buscar cliente..." value="${escapeHtml(state.params.q || "")}" oninput="filtrarClientes()" />
       </div>
+
+      <div class="row-2" style="margin-bottom:14px;">
+        ${
+          rutas.length > 0
+            ? `<select id="cf-ruta" onchange="filtrarClientes()">
+                <option value="" ${!rutaId ? "selected" : ""}>Todas las rutas</option>
+                ${rutas.map((r) => `<option value="${r.id}" ${String(r.id) === String(rutaId) ? "selected" : ""}>${escapeHtml(r.nombre)}</option>`).join("")}
+              </select>`
+            : `<span></span>`
+        }
+        <select id="cf-estado" onchange="filtrarClientes()">
+          <option value="" ${!estadoFiltro ? "selected" : ""}>Todos los estados</option>
+          <option value="mora" ${estadoFiltro === "mora" ? "selected" : ""}>En mora</option>
+          <option value="al_dia" ${estadoFiltro === "al_dia" ? "selected" : ""}>Al día</option>
+        </select>
+      </div>
+
       ${
         filtrados.length === 0
-          ? `<div class="empty-state"><div class="icon">👤</div><p>${clientes.length === 0 ? "Todavía no tienes clientes" : "No se encontraron clientes"}</p></div>`
+          ? `<div class="empty-state"><div class="icon">👤</div><p>${clientes.length === 0 ? "Todavía no tienes clientes" : "No se encontraron clientes con ese filtro"}</p></div>`
           : filtrados.map((c) => `
             <div class="list-item" onclick="go('cliente-detalle', {id: ${c.id}})">
               <div class="avatar">${escapeHtml(iniciales(c.nombre))}</div>
@@ -463,6 +512,14 @@ async function viewClientes() {
     </main>
     <button class="fab" onclick="abrirNuevoCliente()">${ICONS.plus}</button>
   `;
+}
+
+function filtrarClientes() {
+  const q = document.getElementById("cf-q").value;
+  const rutaSel = document.getElementById("cf-ruta");
+  const ruta_id = rutaSel ? rutaSel.value : "";
+  const estado = document.getElementById("cf-estado").value;
+  go("clientes", { q, ruta_id, estado });
 }
 
 async function abrirNuevoCliente() {
@@ -516,19 +573,80 @@ async function guardarCliente() {
   }
 }
 
+async function abrirEditarCliente(id) {
+  const [cliente, rutas] = await Promise.all([
+    api(`/clientes/${id}`),
+    state.cache.rutas || api("/rutas"),
+  ]);
+  state.cache.rutas = rutas;
+  openSheet(`
+    <h3>Editar cliente</h3>
+    <div id="form-error"></div>
+    <div class="field"><label>Nombre completo *</label><input id="ec-nombre" value="${escapeHtml(cliente.nombre)}" required /></div>
+    <div class="row-2">
+      <div class="field"><label>Teléfono</label><input id="ec-telefono" value="${escapeHtml(cliente.telefono || "")}" /></div>
+      <div class="field"><label>Identificación (opcional)</label><input id="ec-id" value="${escapeHtml(cliente.identificacion || "")}" /></div>
+    </div>
+    <div class="field"><label>Dirección</label><input id="ec-direccion" value="${escapeHtml(cliente.direccion || "")}" /></div>
+    <div class="field">
+      <label>Ruta de cobro (opcional)</label>
+      <select id="ec-ruta">
+        <option value="">Sin ruta</option>
+        ${rutas.map((r) => `<option value="${r.id}" ${String(r.id) === String(cliente.ruta_id) ? "selected" : ""}>${escapeHtml(r.nombre)}</option>`).join("")}
+      </select>
+    </div>
+    <div class="field"><label>Notas</label><textarea id="ec-notas" rows="2">${escapeHtml(cliente.notas || "")}</textarea></div>
+    <button class="btn btn-primary btn-block" onclick="guardarEdicionCliente(${id})">Guardar cambios</button>
+  `);
+}
+
+async function guardarEdicionCliente(id) {
+  const nombre = document.getElementById("ec-nombre").value.trim();
+  if (!nombre) {
+    document.getElementById("form-error").innerHTML = `<div class="error-msg">El nombre es obligatorio</div>`;
+    return;
+  }
+  try {
+    await api(`/clientes/${id}`, {
+      method: "PUT",
+      body: {
+        nombre,
+        telefono: document.getElementById("ec-telefono").value.trim(),
+        identificacion: document.getElementById("ec-id").value.trim(),
+        direccion: document.getElementById("ec-direccion").value.trim(),
+        ruta_id: document.getElementById("ec-ruta").value || null,
+        notas: document.getElementById("ec-notas").value.trim(),
+      },
+    });
+    closeSheet();
+    state.cache.clientes = null;
+    toast("Cliente actualizado", "success");
+    renderCurrentView();
+  } catch (e) {
+    document.getElementById("form-error").innerHTML = `<div class="error-msg">${e.message}</div>`;
+  }
+}
+
 async function viewClienteDetalle(id) {
   const cliente = await api(`/clientes/${id}`);
   const prestamosActivos = cliente.prestamos.filter((p) => p.estado === "activo");
   const otros = cliente.prestamos.filter((p) => p.estado !== "activo");
+  const empenosActivos = cliente.empenos.filter((e) => e.estado === "activo");
+  const empenosHistorial = cliente.empenos.filter((e) => e.estado !== "activo");
 
   return `
     ${topbar(escapeHtml(cliente.nombre), "clientes")}
     <main class="view">
       <div class="card">
-        ${cliente.telefono ? `<div style="padding:4px 0;"><span class="muted">Teléfono:</span> ${escapeHtml(cliente.telefono)}</div>` : ""}
-        ${cliente.direccion ? `<div style="padding:4px 0;"><span class="muted">Dirección:</span> ${escapeHtml(cliente.direccion)}</div>` : ""}
-        ${cliente.identificacion ? `<div style="padding:4px 0;"><span class="muted">Identificación:</span> ${escapeHtml(cliente.identificacion)}</div>` : ""}
-        ${cliente.notas ? `<div style="padding:4px 0;"><span class="muted">Notas:</span> ${escapeHtml(cliente.notas)}</div>` : ""}
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+          <div style="flex:1;">
+            ${cliente.telefono ? `<div style="padding:4px 0;"><span class="muted">Teléfono:</span> ${escapeHtml(cliente.telefono)}</div>` : ""}
+            ${cliente.direccion ? `<div style="padding:4px 0;"><span class="muted">Dirección:</span> ${escapeHtml(cliente.direccion)}</div>` : ""}
+            ${cliente.identificacion ? `<div style="padding:4px 0;"><span class="muted">Identificación:</span> ${escapeHtml(cliente.identificacion)}</div>` : ""}
+            ${cliente.notas ? `<div style="padding:4px 0;"><span class="muted">Notas:</span> ${escapeHtml(cliente.notas)}</div>` : ""}
+          </div>
+          <button class="btn-edit-fecha" title="Editar cliente" onclick="abrirEditarCliente(${cliente.id})">✏️</button>
+        </div>
       </div>
 
       <button class="btn btn-primary btn-block" onclick="abrirNuevoPrestamo(${cliente.id})">+ Nuevo préstamo para ${escapeHtml(cliente.nombre.split(" ")[0])}</button>
@@ -542,7 +660,22 @@ async function viewClienteDetalle(id) {
 
       ${
         otros.length
-          ? `<div class="section-title"><span>Historial</span></div>` + otros.map(prestamoListItem).join("")
+          ? `<div class="section-title"><span>Historial de préstamos</span></div>` + otros.map(prestamoListItem).join("")
+          : ""
+      }
+
+      <button class="btn btn-secondary btn-block" style="margin-top:22px;" onclick="abrirNuevoEmpeno(${cliente.id})">+ Nuevo empeño para ${escapeHtml(cliente.nombre.split(" ")[0])}</button>
+
+      <div class="section-title"><span>Empeños activos</span></div>
+      ${
+        empenosActivos.length === 0
+          ? `<p class="muted">Sin empeños activos</p>`
+          : empenosActivos.map((e) => empenoListItem(e, false)).join("")
+      }
+
+      ${
+        empenosHistorial.length
+          ? `<div class="section-title"><span>Historial de empeños</span></div>` + empenosHistorial.map((e) => empenoListItem(e, false)).join("")
           : ""
       }
 
@@ -827,12 +960,12 @@ async function viewEmpenos() {
       ${
         activos.length === 0
           ? `<div class="empty-state"><div class="icon">🪙</div><p>Todavía no tienes empeños activos</p></div>`
-          : activos.map(empenoListItem).join("")
+          : activos.map((e) => empenoListItem(e)).join("")
       }
 
       ${
         historial.length
-          ? `<div class="section-title"><span>Historial</span></div>` + historial.map(empenoListItem).join("")
+          ? `<div class="section-title"><span>Historial</span></div>` + historial.map((e) => empenoListItem(e)).join("")
           : ""
       }
     </main>
@@ -840,17 +973,18 @@ async function viewEmpenos() {
   `;
 }
 
-function empenoListItem(e) {
+// mostrarCliente=false se usa en la ficha del cliente, donde el nombre ya
+// está de sobra (es la pantalla de ese mismo cliente).
+function empenoListItem(e, mostrarCliente = true) {
   const estado = e.estado === "activo" && e.atrasado ? "atrasada" : e.estado;
   const estadoTexto =
     e.estado === "activo" ? (e.atrasado ? "Atrasado" : "Activo") : e.estado === "pagado" ? "Pagado" : "Cancelado";
+  const detalle = mostrarCliente ? `${escapeHtml(e.cliente_nombre)} · interés ${money(e.interes_mensual)}/mes` : `Interés ${money(e.interes_mensual)}/mes`;
   return `
     <div class="list-item" onclick="go('empeno-detalle', {id: ${e.id}})">
       <div class="info">
         <div class="title">${escapeHtml(e.descripcion)}</div>
-        <div class="subtitle">${escapeHtml(e.cliente_nombre)} · interés ${money(e.interes_mensual)}/mes${
-          e.estado === "activo" ? " · vence " + fechaCorta(e.fecha_proximo_pago) : ""
-        }</div>
+        <div class="subtitle">${detalle}${e.estado === "activo" ? " · vence " + fechaCorta(e.fecha_proximo_pago) : ""}</div>
       </div>
       <div style="text-align:right;">
         <div class="amount">${money(e.valor)}</div>
@@ -860,7 +994,7 @@ function empenoListItem(e) {
   `;
 }
 
-async function abrirNuevoEmpeno() {
+async function abrirNuevoEmpeno(clienteIdPreseleccionado) {
   const clientes = state.cache.clientes || (await api("/clientes"));
   state.cache.clientes = clientes;
 
@@ -882,7 +1016,7 @@ async function abrirNuevoEmpeno() {
     <div class="field">
       <label>Cliente *</label>
       <select id="ne-cliente">
-        ${clientes.map((c) => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join("")}
+        ${clientes.map((c) => `<option value="${c.id}" ${clienteIdPreseleccionado == c.id ? "selected" : ""}>${escapeHtml(c.nombre)}</option>`).join("")}
       </select>
     </div>
     <div class="field"><label>¿Qué dejó empeñado? *</label><input id="ne-descripcion" placeholder="Ej. Cadena de oro, TV 42 pulgadas..." required /></div>

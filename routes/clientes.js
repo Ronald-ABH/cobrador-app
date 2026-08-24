@@ -1,6 +1,7 @@
 const express = require("express");
 const { db } = require("../db");
 const { requireAuth } = require("../middleware/auth");
+const { hoyISO } = require("../utils/fecha");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -38,7 +39,14 @@ router.get("/:id", (req, res) => {
   const prestamos = db
     .prepare("SELECT * FROM prestamos WHERE cliente_id = ? ORDER BY created_at DESC")
     .all(req.params.id);
-  res.json({ ...cliente, prestamos });
+  // Empeños del cliente: se muestran aparte de los préstamos en su ficha,
+  // pero es información de solo lectura aquí — el dinero sigue sin mezclarse.
+  const hoy = hoyISO();
+  const empenos = db
+    .prepare("SELECT * FROM empenos WHERE cliente_id = ? ORDER BY created_at DESC")
+    .all(req.params.id)
+    .map((e) => ({ ...e, atrasado: e.estado === "activo" && e.fecha_proximo_pago < hoy }));
+  res.json({ ...cliente, prestamos, empenos });
 });
 
 router.post("/", (req, res) => {
