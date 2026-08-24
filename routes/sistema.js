@@ -1,7 +1,7 @@
 const express = require("express");
 const { requireAuth } = require("../middleware/auth");
 const { enviarBackupPorCorreo } = require("../utils/backup");
-const { importarCSV } = require("../utils/importarCreditosBYM");
+const { importarCSV, corregirFechasImportacion } = require("../utils/importarCreditosBYM");
 
 const router = express.Router();
 
@@ -37,6 +37,25 @@ router.post("/importar-clientes", requireAuth, (req, res) => {
   } catch (err) {
     console.error("[importar-clientes]", err);
     res.status(400).json({ error: "No se pudo importar el archivo: " + err.message });
+  }
+});
+
+// Corrección puntual (una sola vez) para los préstamos que se importaron
+// ANTES de que el importador usara la fecha real de próximo pago de la app
+// anterior. Se sube el mismo CSV otra vez y se recalculan solo las fechas
+// de las cuotas de los préstamos ya importados (nunca toca préstamos con
+// pagos ya registrados). Ver utils/importarCreditosBYM.js.
+router.post("/corregir-fechas-importacion", requireAuth, (req, res) => {
+  const { csv } = req.body || {};
+  if (!csv || typeof csv !== "string") {
+    return res.status(400).json({ error: "Falta el contenido del archivo CSV" });
+  }
+  try {
+    const resumen = corregirFechasImportacion(csv);
+    res.json(resumen);
+  } catch (err) {
+    console.error("[corregir-fechas-importacion]", err);
+    res.status(400).json({ error: "No se pudo corregir el archivo: " + err.message });
   }
 });
 

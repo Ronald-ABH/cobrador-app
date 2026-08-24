@@ -408,6 +408,24 @@ async function viewAgenda() {
   const filtros = `<option value="">Todas las rutas</option>` +
     rutas.map((r) => `<option value="${r.id}" ${String(r.id) === String(rutaId) ? "selected" : ""}>${escapeHtml(r.nombre)}</option>`).join("");
 
+  const deHoy = agenda.filter((c) => !c.atrasada);
+  const atrasados = agenda.filter((c) => c.atrasada);
+
+  const filaCuota = (c) => `
+    <div class="list-item">
+      <div class="avatar">${escapeHtml(iniciales(c.cliente_nombre))}</div>
+      <div class="info" onclick="go('cliente-detalle', {id: ${c.cliente_id}})">
+        <div class="title">${escapeHtml(c.cliente_nombre)}</div>
+        <div class="subtitle">${escapeHtml(c.direccion || c.telefono || "")} · Cuota #${c.numero}</div>
+        <span class="badge ${c.atrasada ? "atrasada" : "pendiente"}">${c.atrasada ? "Atrasada · " + fechaCorta(c.fecha_vencimiento) : "Vence hoy"}</span>
+      </div>
+      <div style="text-align:right;">
+        <div class="amount debt">${money(c.valor - c.valor_pagado)}</div>
+        <button class="btn btn-primary btn-sm" style="margin-top:6px;" onclick="abrirRegistrarPago(${c.id}, ${c.valor - c.valor_pagado}, '${(c.cliente_nombre || "").replace(/['"\\]/g, "")}')">Cobrar</button>
+      </div>
+    </div>
+  `;
+
   return `
     ${topbar("Agenda de cobro")}
     <main class="view">
@@ -419,20 +437,21 @@ async function viewAgenda() {
       ${
         agenda.length === 0
           ? `<div class="empty-state"><div class="icon">✅</div><p>No hay cuotas pendientes${rutaId ? " en esta ruta" : ""}</p></div>`
-          : agenda.map((c) => `
-            <div class="list-item">
-              <div class="avatar">${escapeHtml(iniciales(c.cliente_nombre))}</div>
-              <div class="info" onclick="go('cliente-detalle', {id: ${c.cliente_id}})">
-                <div class="title">${escapeHtml(c.cliente_nombre)}</div>
-                <div class="subtitle">${escapeHtml(c.direccion || c.telefono || "")} · Cuota #${c.numero}</div>
-                <span class="badge ${c.atrasada ? "atrasada" : "pendiente"}">${c.atrasada ? "Atrasada · " + fechaCorta(c.fecha_vencimiento) : "Vence hoy"}</span>
-              </div>
-              <div style="text-align:right;">
-                <div class="amount debt">${money(c.valor - c.valor_pagado)}</div>
-                <button class="btn btn-primary btn-sm" style="margin-top:6px;" onclick="abrirRegistrarPago(${c.id}, ${c.valor - c.valor_pagado}, '${(c.cliente_nombre || "").replace(/['"\\]/g, "")}')">Cobrar</button>
-              </div>
-            </div>
-          `).join("")
+          : `
+            <div class="section-title"><span>Hoy</span><span class="muted">${deHoy.length}</span></div>
+            ${
+              deHoy.length === 0
+                ? `<div class="empty-state" style="padding:16px 0;"><p>Ningún pago programado para hoy${rutaId ? " en esta ruta" : ""}</p></div>`
+                : deHoy.map(filaCuota).join("")
+            }
+
+            <div class="section-title" style="margin-top:20px;"><span>Atrasados</span><span class="muted">${atrasados.length}</span></div>
+            ${
+              atrasados.length === 0
+                ? `<div class="empty-state" style="padding:16px 0;"><p>Ningún cliente atrasado${rutaId ? " en esta ruta" : ""} 🎉</p></div>`
+                : atrasados.map(filaCuota).join("")
+            }
+          `
       }
     </main>
   `;
@@ -441,27 +460,52 @@ async function viewAgenda() {
 // ---------------------------------------------------------------------
 // CLIENTES
 // ---------------------------------------------------------------------
+// Aplica los 3 filtros (texto, ruta, estado) sobre la lista completa de
+// clientes ya cargada. Se usa tanto al entrar a la pestaña como al escribir
+// en el buscador (filtrarClientes), para no tener que volver a pedirle la
+// lista al servidor cada vez.
+function aplicarFiltrosClientes(clientes, { q, ruta_id, estado }) {
+  const qNorm = (q || "").toLowerCase();
+  let filtrados = clientes;
+  if (qNorm) {
+    filtrados = filtrados.filter((c) => c.nombre.toLowerCase().includes(qNorm) || (c.telefono || "").includes(qNorm));
+  }
+  if (ruta_id) {
+    filtrados = filtrados.filter((c) => String(c.ruta_id) === String(ruta_id));
+  }
+  if (estado === "mora") {
+    filtrados = filtrados.filter((c) => c.deuda_pendiente > 0);
+  } else if (estado === "al_dia") {
+    filtrados = filtrados.filter((c) => c.deuda_pendiente <= 0);
+  }
+  return filtrados;
+}
+
+function renderListaClientes(filtrados, totalClientes) {
+  return filtrados.length === 0
+    ? `<div class="empty-state"><div class="icon">👤</div><p>${totalClientes === 0 ? "Todavía no tienes clientes" : "No se encontraron clientes con ese filtro"}</p></div>`
+    : filtrados.map((c) => `
+        <div class="list-item" onclick="go('cliente-detalle', {id: ${c.id}})">
+          <div class="avatar">${escapeHtml(iniciales(c.nombre))}</div>
+          <div class="info">
+            <div class="title">${escapeHtml(c.nombre)}</div>
+            <div class="subtitle">${escapeHtml(c.ruta_nombre) || "Sin ruta"} ${c.telefono ? "· " + escapeHtml(c.telefono) : ""}</div>
+          </div>
+          <div class="amount ${c.deuda_pendiente > 0 ? "debt" : "ok"}">${c.deuda_pendiente > 0 ? money(c.deuda_pendiente) : "Al día"}</div>
+        </div>
+      `).join("");
+}
+
 async function viewClientes() {
   const [clientes, rutas] = await Promise.all([api("/clientes"), api("/rutas")]);
   state.cache.clientes = clientes;
   state.cache.rutas = rutas;
 
-  const q = (state.params.q || "").toLowerCase();
+  const q = state.params.q || "";
   const rutaId = state.params.ruta_id || "";
   const estadoFiltro = state.params.estado || ""; // "" | "mora" | "al_dia"
 
-  let filtrados = clientes;
-  if (q) {
-    filtrados = filtrados.filter((c) => c.nombre.toLowerCase().includes(q) || (c.telefono || "").includes(q));
-  }
-  if (rutaId) {
-    filtrados = filtrados.filter((c) => String(c.ruta_id) === String(rutaId));
-  }
-  if (estadoFiltro === "mora") {
-    filtrados = filtrados.filter((c) => c.deuda_pendiente > 0);
-  } else if (estadoFiltro === "al_dia") {
-    filtrados = filtrados.filter((c) => c.deuda_pendiente <= 0);
-  }
+  const filtrados = aplicarFiltrosClientes(clientes, { q, ruta_id: rutaId, estado: estadoFiltro });
 
   const enMora = clientes.filter((c) => c.deuda_pendiente > 0).length;
   const carteraTotal = clientes.reduce((s, c) => s + c.deuda_pendiente, 0);
@@ -505,31 +549,32 @@ async function viewClientes() {
         </select>
       </div>
 
-      ${
-        filtrados.length === 0
-          ? `<div class="empty-state"><div class="icon">👤</div><p>${clientes.length === 0 ? "Todavía no tienes clientes" : "No se encontraron clientes con ese filtro"}</p></div>`
-          : filtrados.map((c) => `
-            <div class="list-item" onclick="go('cliente-detalle', {id: ${c.id}})">
-              <div class="avatar">${escapeHtml(iniciales(c.nombre))}</div>
-              <div class="info">
-                <div class="title">${escapeHtml(c.nombre)}</div>
-                <div class="subtitle">${escapeHtml(c.ruta_nombre) || "Sin ruta"} ${c.telefono ? "· " + escapeHtml(c.telefono) : ""}</div>
-              </div>
-              <div class="amount ${c.deuda_pendiente > 0 ? "debt" : "ok"}">${c.deuda_pendiente > 0 ? money(c.deuda_pendiente) : "Al día"}</div>
-            </div>
-          `).join("")
-      }
+      <div id="clientes-lista">${renderListaClientes(filtrados, clientes.length)}</div>
     </main>
     <button class="fab" onclick="abrirNuevoCliente()">${ICONS.plus}</button>
   `;
 }
 
+// IMPORTANTE: esto NO llama a go()/renderCurrentView(). Antes sí lo hacía, y
+// como eso reconstruye toda la página (incluido el propio buscador) en cada
+// letra que se escribía, el campo perdía el foco al instante — parecía que
+// "la página se actualizaba sola" y no dejaba seguir escribiendo. Ahora solo
+// se recalcula el filtro sobre los clientes que ya están en memoria y se
+// reemplaza únicamente la lista de resultados; el buscador y los selects no
+// se tocan, así que el cursor y el foco se quedan donde estaban.
 function filtrarClientes() {
   const q = document.getElementById("cf-q").value;
   const rutaSel = document.getElementById("cf-ruta");
   const ruta_id = rutaSel ? rutaSel.value : "";
   const estado = document.getElementById("cf-estado").value;
-  go("clientes", { q, ruta_id, estado });
+
+  // Se guarda en state.params (sin re-renderizar) para que si el usuario
+  // sale de Clientes y vuelve, encuentre el mismo filtro que dejó.
+  state.params = { q, ruta_id, estado };
+
+  const clientes = state.cache.clientes || [];
+  const filtrados = aplicarFiltrosClientes(clientes, { q, ruta_id, estado });
+  document.getElementById("clientes-lista").innerHTML = renderListaClientes(filtrados, clientes.length);
 }
 
 async function abrirNuevoCliente() {
@@ -1356,6 +1401,9 @@ async function viewAjustes() {
         <div id="import-resultado"></div>
         <input type="file" id="import-file" accept=".csv,text/csv" onchange="seleccionarArchivoImportacion(event)" style="margin-bottom:10px;width:100%;" />
         <button class="btn btn-secondary btn-block" id="import-btn" disabled onclick="ejecutarImportacion()">Importar archivo</button>
+        <p class="muted" style="margin-top:14px;">Si ya importaste antes y la Agenda no mostraba bien los días de pago de esos clientes, sube el mismo archivo aquí y corrige solo las fechas (no crea clientes ni préstamos nuevos, y no toca préstamos que ya tengan pagos registrados):</p>
+        <div id="corregir-resultado"></div>
+        <button class="btn btn-secondary btn-block" id="corregir-btn" disabled onclick="ejecutarCorreccionFechas()">Corregir fechas de préstamos ya importados</button>
       </div>
 
       <button class="btn btn-danger btn-block" style="margin-top:20px;" onclick="logout()">Cerrar sesión</button>
@@ -1366,19 +1414,24 @@ async function viewAjustes() {
 async function seleccionarArchivoImportacion(ev) {
   const file = ev.target.files[0];
   const btn = document.getElementById("import-btn");
+  const corregirBtn = document.getElementById("corregir-btn");
   const resultado = document.getElementById("import-resultado");
   resultado.innerHTML = "";
+  document.getElementById("corregir-resultado").innerHTML = "";
   if (!file) {
     btn.disabled = true;
+    corregirBtn.disabled = true;
     state.importCsv = null;
     return;
   }
   try {
     state.importCsv = await file.text();
     btn.disabled = false;
+    corregirBtn.disabled = false;
   } catch (e) {
     resultado.innerHTML = `<div class="error-msg">No se pudo leer el archivo</div>`;
     btn.disabled = true;
+    corregirBtn.disabled = true;
   }
 }
 
@@ -1410,6 +1463,35 @@ async function ejecutarImportacion() {
   }
   btn.disabled = false;
   btn.textContent = "Importar archivo";
+}
+
+async function ejecutarCorreccionFechas() {
+  if (!state.importCsv) return;
+  const btn = document.getElementById("corregir-btn");
+  const resultado = document.getElementById("corregir-resultado");
+  btn.disabled = true;
+  btn.textContent = "Corrigiendo...";
+  try {
+    const r = await api("/sistema/corregir-fechas-importacion", { method: "POST", body: { csv: state.importCsv } });
+    resultado.innerHTML = `
+      <div class="ok-msg">
+        Corrección completada.<br>
+        Préstamos revisados: <b>${r.prestamosRevisados}</b><br>
+        Corregidos: <b>${r.prestamosCorregidos}</b> · Ya estaban bien: ${r.prestamosSinCambios} · Con pagos (no se tocaron): ${r.prestamosOmitidosPorTenerPagos}
+        ${
+          r.advertencias && r.advertencias.length
+            ? `<br><br><b>Advertencias:</b><br>${r.advertencias.map(escapeHtml).join("<br>")}`
+            : ""
+        }
+      </div>
+    `;
+    toast("Fechas corregidas", "success");
+    state.cache.clientes = null;
+  } catch (e) {
+    resultado.innerHTML = `<div class="error-msg">${e.message}</div>`;
+  }
+  btn.disabled = false;
+  btn.textContent = "Corregir fechas de préstamos ya importados";
 }
 
 async function cambiarPassword() {

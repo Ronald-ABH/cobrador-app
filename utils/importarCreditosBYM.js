@@ -8,8 +8,15 @@
 // pagaba ese cliente en la app vieja, para que el calendario de cobro
 // quede parecido a como ya estaba acostumbrado.
 const { db } = require("../db");
-const { generarCuotas } = require("./interest");
+const { generarCuotas, DIAS_POR_FRECUENCIA, sumarDias } = require("./interest");
 const { hoyISO } = require("./fecha");
+
+// Valida que un texto tenga forma de fecha YYYY-MM-DD (la app vieja siempre
+// exporta las fechas así, pero si el campo viene vacío o corrupto es mejor
+// ignorarlo que reventar el import).
+function esFechaValida(v) {
+  return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+}
 
 // El mismo cliente real puede tener varios saldos separados en el archivo
 // viejo (el papá de Ronald a veces creaba un "cliente" nuevo por cada
@@ -234,7 +241,22 @@ function importarCSV(contenido) {
         numCuotas = MAX_CUOTAS;
       }
 
-      const fechaInicio = hoyISO();
+      // La app anterior sí llevaba la próxima fecha de pago esperada de cada
+      // cliente (scheduled_date, o rescheduled_date si el cobrador la
+      // reprogramó manualmente). generarCuotas() siempre pone la cuota #1 un
+      // período completo DESPUÉS de fecha_inicio — nunca en fecha_inicio
+      // mismo — así que para que la cuota #1 quede exactamente en esa fecha
+      // real (y no siempre "un período desde hoy", que dejaba a todo el
+      // mundo fuera de la Agenda el día del import) hay que "retroceder" el
+      // fecha_inicio un período completo.
+      const diasPeriodo = DIAS_POR_FRECUENCIA[frecuencia] || 1;
+      const fechaObjetivo = esFechaValida(c.rescheduled_date)
+        ? c.rescheduled_date
+        : esFechaValida(c.scheduled_date)
+        ? c.scheduled_date
+        : null;
+      const fechaInicio = fechaObjetivo ? sumarDias(fechaObjetivo, -diasPeriodo) : hoyISO();
+
       const { valor_cuota, total_pagar, cuotas } = generarCuotas({
         monto: saldoActual,
         tasa: 0,
@@ -244,9 +266,13 @@ function importarCSV(contenido) {
         fecha_inicio: fechaInicio,
       });
 
-      const notasPrestamo = `${marcaEsteRegistro} Saldo pendiente importado de la app anterior el ${fechaInicio}. Cuota histórica típica: $${Math.round(
-        cuotaTipica
-      )} cada ~${frecuencia}.`;
+      const notasPrestamo = fechaObjetivo
+        ? `${marcaEsteRegistro} Saldo pendiente importado de la app anterior el ${hoyISO()}, con próximo pago esperado el ${fechaObjetivo} (según la app anterior). Cuota histórica típica: $${Math.round(
+            cuotaTipica
+          )} cada ~${frecuencia}.`
+        : `${marcaEsteRegistro} Saldo pendiente importado de la app anterior el ${hoyISO()}. Cuota histórica típica: $${Math.round(
+            cuotaTipica
+          )} cada ~${frecuencia}.`;
 
       const infoPrestamo = insertarPrestamo.run(
         clienteId,
@@ -273,4 +299,95 @@ function importarCSV(contenido) {
   return resumen;
 }
 
-module.exports = { importarCSV };
+// --- Corrección puntual de los préstamos que ya se importaron ANTES de que
+// este archivo usara scheduled_date/rescheduled_date (esos quedaron con la
+// cuota #1 fechada "un período desde el día del import", en vez de la fecha
+// real que traía la app anterior). Se sube otra vez el mismo CSV y, para
+// cada préstamo que tenga la marca de import de ese cliente, se recalculan
+// las fechas de sus cuotas. Por seguridad, si un préstamo ya tiene algún
+// pago registrado (porque ya se cobró algo desde que se importó), NO se le
+// tocan las cuotas — se reporta como advertencia para revisar a mano.
+function corregirFechasImportacion(contenido) {
+  const { clientes } = parsearCSV(contenido);
+
+  const resumen = {
+    clientesEnArchivo: clientes.length,
+    prestamosRevisados: 0,
+    prestamosCorregidos: 0,
+    prestamosSinCambios: 0,
+    prestamosOmitidosPorTenerPagos: 0,
+    clientesSinFechaEnArchivo: 0,
+    advertencias: [],
+  };
+
+  const buscarPrestamoImportado = db.prepare(
+    `SELECT p.id, p.cliente_id, p.monto, p.tasa_interes, p.tipo_interes, p.frecuencia, p.num_cuotas, p.fecha_inicio, c.nombre AS cliente_nombre
+     FROM prestamos p JOIN clientes c ON c.id = p.cliente_id
+     WHERE p.notas LIKE '%' || ? || '%'`
+  );
+  const contarPagos = db.prepare(`SELECT COUNT(*) AS n FROM pagos WHERE prestamo_id = ?`);
+  const borrarCuotas = db.prepare(`DELETE FROM cuotas WHERE prestamo_id = ?`);
+  const insertarCuota = db.prepare(
+    `INSERT INTO cuotas (prestamo_id, numero, fecha_vencimiento, valor) VALUES (?, ?, ?, ?)`
+  );
+  const actualizarPrestamo = db.prepare(`UPDATE prestamos SET fecha_inicio = ? WHERE id = ?`);
+
+  const tx = db.transaction(() => {
+    for (const c of clientes) {
+      const fechaObjetivo = esFechaValida(c.rescheduled_date)
+        ? c.rescheduled_date
+        : esFechaValida(c.scheduled_date)
+        ? c.scheduled_date
+        : null;
+      if (!fechaObjetivo) {
+        resumen.clientesSinFechaEnArchivo++;
+        continue;
+      }
+
+      const marca = `${MARCA_IMPORT_PREFIJO}${c._id}]`;
+      const prestamo = buscarPrestamoImportado.get(marca);
+      if (!prestamo) continue; // este cliente no tenía saldo pendiente al importar, no hay nada que corregir
+
+      resumen.prestamosRevisados++;
+
+      const pagos = contarPagos.get(prestamo.id).n;
+      if (pagos > 0) {
+        resumen.prestamosOmitidosPorTenerPagos++;
+        resumen.advertencias.push(
+          `${prestamo.cliente_nombre}: ya tiene pagos registrados desde el import — no se le tocaron las fechas, revisar a mano si hace falta.`
+        );
+        continue;
+      }
+
+      const diasPeriodo = DIAS_POR_FRECUENCIA[prestamo.frecuencia] || 1;
+      const nuevaFechaInicio = sumarDias(fechaObjetivo, -diasPeriodo);
+
+      if (nuevaFechaInicio === prestamo.fecha_inicio) {
+        resumen.prestamosSinCambios++;
+        continue;
+      }
+
+      const { cuotas } = generarCuotas({
+        monto: prestamo.monto,
+        tasa: prestamo.tasa_interes,
+        tipo: prestamo.tipo_interes,
+        frecuencia: prestamo.frecuencia,
+        num_cuotas: prestamo.num_cuotas,
+        fecha_inicio: nuevaFechaInicio,
+      });
+
+      borrarCuotas.run(prestamo.id);
+      for (const cu of cuotas) {
+        insertarCuota.run(prestamo.id, cu.numero, cu.fecha_vencimiento, cu.valor);
+      }
+      actualizarPrestamo.run(nuevaFechaInicio, prestamo.id);
+      resumen.prestamosCorregidos++;
+    }
+  });
+
+  tx();
+
+  return resumen;
+}
+
+module.exports = { importarCSV, corregirFechasImportacion };
