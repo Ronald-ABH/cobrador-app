@@ -358,6 +358,20 @@ a { color: inherit; }
   font-size: 20px;
   color: var(--gold);
   padding: 4px 8px 4px 0;
+  /* display:flex + un tamaño fijo en el propio botón, para que el ícono no
+     dependa de su tamaño "natural" (el SVG de la flecha no trae width ni
+     height propios) — sin esto, dentro de la barra flex del topbar el
+     ícono podía colapsar a tamaño invisible y el botón quedaba ahí, pero
+     sin nada dibujado encima. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.topbar .back-btn svg {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
 }
 
 main.view {
