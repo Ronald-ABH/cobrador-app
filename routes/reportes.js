@@ -124,4 +124,28 @@ router.get("/recaudo-por-dia", (req, res) => {
   res.json(rows);
 });
 
+// Ranking de clientes en mora (los que más deben en cuotas vencidas), para
+// saber a quién priorizar sin tener que revisarlos uno por uno en Agenda.
+router.get("/clientes-en-mora", (req, res) => {
+  const hoy = hoyISO();
+  const limite = Math.min(parseInt(req.query.limite, 10) || 10, 50);
+
+  const rows = db
+    .prepare(
+      `SELECT c.id, c.nombre, c.telefono,
+              SUM(cu.valor - cu.valor_pagado) AS deuda,
+              COUNT(*) AS cuotas_atrasadas
+       FROM cuotas cu
+       JOIN prestamos p ON p.id = cu.prestamo_id
+       JOIN clientes c ON c.id = p.cliente_id
+       WHERE p.estado = 'activo' AND cu.estado != 'pagada' AND cu.fecha_vencimiento < ? AND c.activo = 1
+       GROUP BY c.id
+       ORDER BY deuda DESC
+       LIMIT ?`
+    )
+    .all(hoy, limite);
+
+  res.json(rows);
+});
+
 module.exports = router;

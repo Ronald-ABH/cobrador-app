@@ -76,6 +76,16 @@ function hoyISO() {
   }).format(new Date());
 }
 
+// Resta días de calendario a una fecha ISO (YYYY-MM-DD). Como ya partimos
+// de una fecha calendario correcta (por ejemplo, de hoyISO()), aquí basta
+// con aritmética simple de fechas — no hace falta volver a tocar zonas
+// horarias.
+function restarDiasISO(fechaISO, dias) {
+  const [y, m, d] = fechaISO.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d - dias));
+  return dt.toISOString().slice(0, 10);
+}
+
 async function api(path, options = {}) {
   const resp = await fetch("/api" + path, {
     method: options.method || "GET",
@@ -1235,13 +1245,19 @@ async function borrarRuta(id) {
 // REPORTES
 // ---------------------------------------------------------------------
 async function viewReportes() {
-  const [resumen, recaudo] = await Promise.all([
+  const rango = parseInt(state.params.rango, 10) || 14;
+  const hoy = hoyISO();
+  const desde = restarDiasISO(hoy, rango);
+  const rangosDisponibles = [7, 14, 30, 90];
+
+  const [resumen, recaudo, enMora, empenosResumen] = await Promise.all([
     api("/reportes/resumen"),
-    api("/reportes/recaudo-por-dia"),
+    api(`/reportes/recaudo-por-dia?desde=${desde}&hasta=${hoy}`),
+    api("/reportes/clientes-en-mora"),
+    api("/empenos/reportes/resumen"),
   ]);
 
-  const ultimos = recaudo.slice(-14);
-  const max = Math.max(1, ...ultimos.map((d) => d.total));
+  const max = Math.max(1, ...recaudo.map((d) => d.total));
 
   return `
     ${topbar("Reportes")}
@@ -1253,18 +1269,50 @@ async function viewReportes() {
         <div class="stat-card"><div class="label">Ganancia proyectada</div><div class="value">${money(resumen.gananciaProyectada)}</div></div>
       </div>
 
-      <div class="section-title"><span>Recaudo (últimos 14 días)</span></div>
+      <div class="section-title"><span>Recaudo</span></div>
+      <div class="range-selector">
+        ${rangosDisponibles.map((r) => `<button class="range-chip ${rango === r ? "active" : ""}" onclick="go('reportes', {rango: ${r}})">${r}d</button>`).join("")}
+      </div>
       <div class="card">
         <div class="bar-chart">
-          ${ultimos.map((d) => `<div class="bar" title="${d.dia}: ${money(d.total)}"><div class="fill" style="height:${Math.max(4, (d.total / max) * 100)}%"></div></div>`).join("") || `<span class="muted">Sin datos todavía</span>`}
+          ${recaudo.map((d) => `<div class="bar" title="${d.dia}: ${money(d.total)}"><div class="fill" style="height:${Math.max(4, (d.total / max) * 100)}%"></div></div>`).join("") || `<span class="muted">Sin datos todavía en este rango</span>`}
         </div>
       </div>
+
+      <div class="section-title"><span>Clientes en mora</span></div>
+      ${
+        enMora.length === 0
+          ? `<div class="empty-state"><div class="icon">✅</div><p>Ningún cliente está en mora</p></div>`
+          : enMora
+              .map(
+                (c) => `
+            <div class="list-item" onclick="go('cliente-detalle', {id: ${c.id}})">
+              <div class="avatar">${escapeHtml(iniciales(c.nombre))}</div>
+              <div class="info">
+                <div class="title">${escapeHtml(c.nombre)}</div>
+                <div class="subtitle">${c.cuotas_atrasadas} cuota${c.cuotas_atrasadas === 1 ? "" : "s"} atrasada${c.cuotas_atrasadas === 1 ? "" : "s"}${c.telefono ? " · " + escapeHtml(c.telefono) : ""}</div>
+              </div>
+              <div class="amount debt">${money(c.deuda)}</div>
+            </div>
+          `
+              )
+              .join("")
+      }
 
       <div class="section-title"><span>Totales</span></div>
       <div class="card">
         <div style="display:flex;justify-content:space-between;padding:6px 0;"><span class="muted">Recaudado histórico</span><b>${money(resumen.totalRecaudadoHistorico)}</b></div>
         <div style="display:flex;justify-content:space-between;padding:6px 0;"><span class="muted">Clientes activos</span><b>${resumen.clientesActivos}</b></div>
         <div style="display:flex;justify-content:space-between;padding:6px 0;"><span class="muted">Préstamos activos</span><b>${resumen.prestamosActivos}</b></div>
+      </div>
+
+      <div class="section-title"><span>Empeños</span></div>
+      <p class="muted" style="font-size:12px;margin:-6px 0 12px;">Este dinero es aparte de los préstamos — aquí solo se muestra para tener el panorama completo en un mismo lugar, sin mezclarse con los totales de arriba.</p>
+      <div class="cards-grid">
+        <div class="stat-card"><div class="label">Capital en empeños</div><div class="value">${money(empenosResumen.capitalActivo)}</div></div>
+        <div class="stat-card ${empenosResumen.atrasados > 0 ? "warn" : ""}"><div class="label">Atrasados</div><div class="value">${empenosResumen.atrasados}</div></div>
+        <div class="stat-card"><div class="label">Empeños activos</div><div class="value">${empenosResumen.empenosActivos}</div></div>
+        <div class="stat-card"><div class="label">Interés cobrado</div><div class="value">${money(empenosResumen.interesCobradoHistorico)}</div></div>
       </div>
     </main>
   `;
