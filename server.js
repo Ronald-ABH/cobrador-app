@@ -35,7 +35,11 @@ const app = express();
 app.set("trust proxy", 1);
 
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json());
+// El límite por defecto (100kb) no alcanza para subir el CSV de
+// importación de clientes desde la app anterior (puede pesar unos pocos
+// MB) — se sube un poco el límite para todo el API, que sigue siendo
+// razonable para una app de este tamaño.
+app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
 
 app.use("/api/auth", authRoutes);

@@ -1350,9 +1350,66 @@ async function viewAjustes() {
         <button class="btn btn-secondary btn-block" onclick="enviarBackupAhora()">Enviar copia de seguridad ahora</button>
       </div>
 
+      <div class="section-title"><span>Importar datos</span></div>
+      <div class="card">
+        <p class="muted" style="margin-top:0;">Si tienes una copia de seguridad (CSV) de otra app de cobros, puedes traer aquí los clientes y los saldos que todavía deban. Es seguro intentarlo más de una vez: no se duplican los clientes ni los préstamos que ya se hayan importado antes.</p>
+        <div id="import-resultado"></div>
+        <input type="file" id="import-file" accept=".csv,text/csv" onchange="seleccionarArchivoImportacion(event)" style="margin-bottom:10px;width:100%;" />
+        <button class="btn btn-secondary btn-block" id="import-btn" disabled onclick="ejecutarImportacion()">Importar archivo</button>
+      </div>
+
       <button class="btn btn-danger btn-block" style="margin-top:20px;" onclick="logout()">Cerrar sesión</button>
     </main>
   `;
+}
+
+async function seleccionarArchivoImportacion(ev) {
+  const file = ev.target.files[0];
+  const btn = document.getElementById("import-btn");
+  const resultado = document.getElementById("import-resultado");
+  resultado.innerHTML = "";
+  if (!file) {
+    btn.disabled = true;
+    state.importCsv = null;
+    return;
+  }
+  try {
+    state.importCsv = await file.text();
+    btn.disabled = false;
+  } catch (e) {
+    resultado.innerHTML = `<div class="error-msg">No se pudo leer el archivo</div>`;
+    btn.disabled = true;
+  }
+}
+
+async function ejecutarImportacion() {
+  if (!state.importCsv) return;
+  const btn = document.getElementById("import-btn");
+  const resultado = document.getElementById("import-resultado");
+  btn.disabled = true;
+  btn.textContent = "Importando...";
+  try {
+    const r = await api("/sistema/importar-clientes", { method: "POST", body: { csv: state.importCsv } });
+    resultado.innerHTML = `
+      <div class="ok-msg">
+        Importación completada.<br>
+        Clientes nuevos: <b>${r.clientesCreados}</b> (ya existían: ${r.clientesYaExistian})<br>
+        Préstamos importados: <b>${r.prestamosCreados}</b> (ya estaban importados antes: ${r.prestamosOmitidosYaImportados})<br>
+        Cartera importada: <b>${money(r.carteraTotalImportada)}</b>
+        ${
+          r.advertencias && r.advertencias.length
+            ? `<br><br><b>Advertencias:</b><br>${r.advertencias.map(escapeHtml).join("<br>")}`
+            : ""
+        }
+      </div>
+    `;
+    toast("Importación completada", "success");
+    state.cache.clientes = null;
+  } catch (e) {
+    resultado.innerHTML = `<div class="error-msg">${e.message}</div>`;
+  }
+  btn.disabled = false;
+  btn.textContent = "Importar archivo";
 }
 
 async function cambiarPassword() {
