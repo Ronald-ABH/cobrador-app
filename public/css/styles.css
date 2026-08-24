@@ -305,7 +305,12 @@ a { color: inherit; }
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
   border-bottom: 1px solid var(--border);
-  padding: 16px 20px;
+  /* Cuando la app está instalada en el iPhone (Agregar a Inicio), la
+     página se dibuja por debajo de la barra de estado / el notch. Sin
+     sumarle ese espacio de seguridad, el título y el botón de "atrás"
+     quedaban pegados arriba del todo, casi tapados por el reloj/la
+     batería, y el botón de atrás se veía apenas o nada. */
+  padding: calc(16px + env(safe-area-inset-top)) 20px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
