@@ -24,7 +24,18 @@ router.get("/:id", (req, res) => {
     .prepare("SELECT * FROM cuotas WHERE prestamo_id = ? ORDER BY numero")
     .all(req.params.id);
   const cliente = db.prepare("SELECT * FROM clientes WHERE id = ?").get(prestamo.cliente_id);
-  res.json({ ...prestamo, cuotas, cliente });
+  // Historial de pagos de este préstamo, para poder deshacer uno si se
+  // registró por error (mal digitado, o un pago que en realidad no se hizo).
+  const pagos = db
+    .prepare(
+      `SELECT pa.*, cu.numero AS cuota_numero
+       FROM pagos pa
+       JOIN cuotas cu ON cu.id = pa.cuota_id
+       WHERE pa.prestamo_id = ?
+       ORDER BY pa.fecha DESC, pa.id DESC`
+    )
+    .all(req.params.id);
+  res.json({ ...prestamo, cuotas, cliente, pagos });
 });
 
 router.post("/", (req, res) => {

@@ -7,6 +7,10 @@ const state = {
   user: null,
   view: "dashboard",
   params: {},
+  // Pila de pantallas visitadas, para que el botón "atrás" regrese a donde
+  // el usuario realmente venía (Agenda, Inicio, Clientes...) en vez de un
+  // destino fijo que a veces no era el correcto.
+  historial: [],
   cache: {
     clientes: null,
     rutas: null,
@@ -160,9 +164,37 @@ function toast(msg, type = "") {
   setTimeout(() => el.remove(), 2600);
 }
 
+// Pestañas principales (las del menú de abajo): entrar a una de ellas es
+// como "empezar de nuevo" desde ahí, así que no se guardan en el
+// historial de regreso — solo las pantallas de detalle sí.
+const VISTAS_RAIZ = ["dashboard", "agenda", "clientes", "empenos", "reportes", "ajustes"];
+
 function go(view, params = {}) {
+  if (VISTAS_RAIZ.includes(view)) {
+    state.historial = [];
+  } else {
+    // Guarda dónde estábamos parados antes de entrar a esta pantalla de
+    // detalle, para que el botón "atrás" regrese ahí de verdad (a la
+    // pestaña o ficha desde la que se entró) y no a un destino fijo.
+    state.historial.push({ view: state.view, params: state.params });
+  }
   state.view = view;
   state.params = params;
+  window.scrollTo(0, 0);
+  render();
+}
+
+// Botón "atrás" del topbar: regresa a la pantalla anterior de verdad
+// (Agenda, Inicio, la ficha del cliente, etc.), tomándola del historial en
+// vez de ir siempre a un destino fijo.
+function volver() {
+  const anterior = state.historial.pop();
+  if (!anterior) {
+    go("dashboard");
+    return;
+  }
+  state.view = anterior.view;
+  state.params = anterior.params;
   window.scrollTo(0, 0);
   render();
 }
@@ -290,9 +322,9 @@ async function renderCurrentView() {
   }
 }
 
-function topbar(title, backView) {
+function topbar(title) {
   return `<div class="topbar">
-      ${backView ? `<button class="back-btn" onclick="go('${backView}')">${ICONS.back}</button>` : "<span></span>"}
+      ${state.historial.length > 0 ? `<button class="back-btn" onclick="volver()">${ICONS.back}</button>` : "<span></span>"}
       <h2>${title}</h2>
       <span style="width:24px"></span>
     </div>`;
@@ -750,7 +782,7 @@ async function viewClienteDetalle(id) {
   const empenosHistorial = cliente.empenos.filter((e) => e.estado !== "activo");
 
   return `
-    ${topbar(escapeHtml(cliente.nombre), "clientes")}
+    ${topbar(escapeHtml(cliente.nombre))}
     <main class="view">
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;">
@@ -923,7 +955,7 @@ async function viewPrestamoDetalle(id) {
   const pct = p.total_pagar > 0 ? Math.round((totalPagado / p.total_pagar) * 100) : 0;
 
   return `
-    ${topbar("Préstamo", "cliente-detalle")}
+    ${topbar("Préstamo")}
     <main class="view">
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -940,8 +972,46 @@ async function viewPrestamoDetalle(id) {
 
       <div class="section-title"><span>Cuotas</span></div>
       ${p.cuotas.map((c) => cuotaRow(c, p)).join("")}
+
+      <div class="section-title" style="margin-top:20px;"><span>Historial de pagos</span></div>
+      ${
+        !p.pagos || p.pagos.length === 0
+          ? `<p class="muted">Todavía no hay pagos registrados</p>`
+          : p.pagos
+              .map(
+                (pg) => `
+            <div class="list-item">
+              <div class="info">
+                <div class="title">Cuota #${pg.cuota_numero}</div>
+                <div class="subtitle">${fechaCorta(pg.fecha)}${pg.notas ? " · " + escapeHtml(pg.notas) : ""}</div>
+              </div>
+              <div style="text-align:right;">
+                <div class="amount ok">${money(pg.valor)}</div>
+                <button class="btn-edit-fecha" title="Deshacer pago" onclick="deshacerPago(${pg.id})">↩️</button>
+              </div>
+            </div>
+          `
+              )
+              .join("")
+      }
     </main>
   `;
+}
+
+// Deshacer un pago de préstamo por si se digitó mal el valor o se registró
+// un pago que en realidad el cliente no hizo. Se quita del historial y la
+// cuota (y el préstamo, si ya estaba marcado como pagado) vuelven a quedar
+// con el saldo pendiente correcto — después se puede volver a registrar el
+// pago bien.
+async function deshacerPago(pagoId) {
+  if (!confirm("¿Deshacer este pago? Se eliminará del historial y la cuota volverá a quedar pendiente por ese valor.")) return;
+  try {
+    await api(`/pagos/${pagoId}`, { method: "DELETE" });
+    toast("Pago deshecho");
+    renderCurrentView();
+  } catch (e) {
+    toast(e.message, "error");
+  }
 }
 
 function cuotaRow(c, prestamo) {
@@ -1178,7 +1248,7 @@ async function viewEmpenoDetalle(id) {
     e.estado === "activo" ? (e.atrasado ? "Atrasado" : "Activo") : e.estado === "pagado" ? "Pagado" : "Cancelado";
 
   return `
-    ${topbar("Empeño", "empenos")}
+    ${topbar("Empeño")}
     <main class="view">
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -1310,7 +1380,7 @@ async function viewRutas() {
   const rutas = await api("/rutas");
   state.cache.rutas = rutas;
   return `
-    ${topbar("Rutas de cobro", "ajustes")}
+    ${topbar("Rutas de cobro")}
     <main class="view">
       <div class="field" style="display:flex;gap:8px;">
         <input id="nr-nombre" placeholder="Nombre de la nueva ruta" style="flex:1;" />
