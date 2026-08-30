@@ -1,4 +1,5 @@
 const express = require("express");
+const ExcelJS = require("exceljs");
 const { db } = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { hoyISO, sumarDiasISO, SQLITE_OFFSET } = require("../utils/fecha");
@@ -124,7 +125,7 @@ router.get("/recaudo-por-dia", (req, res) => {
 
   const rows = db
     .prepare(
-      `SELECT ${FECHA_LOCAL_SQL} AS dia, SUM(pa.valor) AS total
+      `SELECT ${FECHA_LOCAL_SQL} AS dia, SUM(pa.valor) AS total, COUNT(*) AS cantidad
        FROM pagos pa
        JOIN prestamos p ON p.id = pa.prestamo_id
        JOIN clientes c ON c.id = p.cliente_id
@@ -135,6 +136,171 @@ router.get("/recaudo-por-dia", (req, res) => {
     .all(desde, hasta);
 
   res.json(rows);
+});
+
+const FECHA_ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Detalle de todos los pagos de préstamos hechos en un día calendario
+// puntual (hora de Colombia), para el historial de pagos por día. Solo
+// préstamos — los pagos de interés de empeños son un negocio aparte y no
+// se mezclan aquí.
+router.get("/pagos-del-dia/:fecha", (req, res) => {
+  if (!FECHA_ISO_RE.test(req.params.fecha)) {
+    return res.status(400).json({ error: "Fecha inválida" });
+  }
+  const rows = db
+    .prepare(
+      `SELECT pa.id, pa.valor, pa.fecha, pa.notas,
+              cu.numero AS cuota_numero,
+              c.id AS cliente_id, c.nombre AS cliente_nombre,
+              p.id AS prestamo_id
+       FROM pagos pa
+       JOIN cuotas cu ON cu.id = pa.cuota_id
+       JOIN prestamos p ON p.id = pa.prestamo_id
+       JOIN clientes c ON c.id = p.cliente_id
+       WHERE ${FECHA_LOCAL_SQL} = ? AND c.activo = 1
+       ORDER BY pa.fecha DESC, pa.id DESC`
+    )
+    .all(req.params.fecha);
+
+  res.json(rows);
+});
+
+// Ganancia REAL ya cobrada (no proyectada), agrupada por día, semana, mes o
+// año. Como cuotas/pagos no separan capital e interés, se usa el mismo
+// método que "ganancia proyectada" del resumen: a cada pago se le aplica la
+// proporción de interés de SU préstamo — (total_a_pagar - monto) /
+// total_a_pagar — y esa parte es la que cuenta como ganancia.
+router.get("/ganancia-por-periodo", (req, res) => {
+  const periodo = ["dia", "semana", "mes", "anio"].includes(req.query.periodo)
+    ? req.query.periodo
+    : "dia";
+  const hoy = hoyISO();
+
+  // No tiene sentido traer años de datos para agruparlos por día, ni traer
+  // apenas un mes para intentar ver una tendencia anual.
+  const diasHaciaAtras = { dia: 30, semana: 12 * 7, mes: 366, anio: 5 * 366 }[periodo];
+  const desde = sumarDiasISO(hoy, -diasHaciaAtras);
+
+  const filas = db
+    .prepare(
+      `SELECT ${FECHA_LOCAL_SQL} AS dia_local, pa.valor AS valor_pago, p.monto, p.total_pagar
+       FROM pagos pa
+       JOIN prestamos p ON p.id = pa.prestamo_id
+       JOIN clientes c ON c.id = p.cliente_id
+       WHERE ${FECHA_LOCAL_SQL} BETWEEN ? AND ? AND c.activo = 1`
+    )
+    .all(desde, hoy);
+
+  // Clave de agrupación a partir de la fecha local (YYYY-MM-DD) de cada pago.
+  function claveDeGrupo(diaLocal) {
+    if (periodo === "dia") return diaLocal;
+    if (periodo === "mes") return diaLocal.slice(0, 7); // YYYY-MM
+    if (periodo === "anio") return diaLocal.slice(0, 4); // YYYY
+    // "semana": se agrupa por el lunes de esa semana
+    const [y, m, d] = diaLocal.split("-").map(Number);
+    const fecha = new Date(Date.UTC(y, m - 1, d));
+    const diaSemana = fecha.getUTCDay(); // 0=domingo..6=sábado
+    const offsetHastaLunes = diaSemana === 0 ? 6 : diaSemana - 1;
+    fecha.setUTCDate(fecha.getUTCDate() - offsetHastaLunes);
+    return fecha.toISOString().slice(0, 10);
+  }
+
+  const grupos = new Map();
+  for (const fila of filas) {
+    if (!fila.total_pagar || fila.total_pagar <= 0) continue;
+    const proporcionInteres = Math.max(0, (fila.total_pagar - fila.monto) / fila.total_pagar);
+    const ganancia = fila.valor_pago * proporcionInteres;
+    const clave = claveDeGrupo(fila.dia_local);
+    grupos.set(clave, (grupos.get(clave) || 0) + ganancia);
+  }
+
+  const resultado = Array.from(grupos.entries())
+    .map(([periodo_key, ganancia]) => ({
+      periodo: periodo_key,
+      ganancia: Math.round(ganancia * 100) / 100,
+    }))
+    .sort((a, b) => (a.periodo < b.periodo ? -1 : 1));
+
+  res.json(resultado);
+});
+
+// Descarga en Excel de los pagos de préstamos (para que Ronald tenga su
+// propia copia legible, aparte del backup automático diario en .db/.json).
+router.get("/exportar-pagos", async (req, res) => {
+  const rango = ["dia", "mes", "anio", "todo"].includes(req.query.rango) ? req.query.rango : "dia";
+  const hoy = hoyISO();
+
+  let desde = null;
+  if (rango === "dia") desde = hoy;
+  else if (rango === "mes") desde = hoy.slice(0, 7) + "-01";
+  else if (rango === "anio") desde = hoy.slice(0, 4) + "-01-01";
+  // "todo": sin límite inferior, se trae el historial completo.
+
+  let query = `
+    SELECT ${FECHA_LOCAL_SQL} AS fecha_local, pa.fecha AS fecha_hora, pa.valor, pa.notas,
+           c.nombre AS cliente_nombre, cu.numero AS cuota_numero, p.id AS prestamo_id
+    FROM pagos pa
+    JOIN cuotas cu ON cu.id = pa.cuota_id
+    JOIN prestamos p ON p.id = pa.prestamo_id
+    JOIN clientes c ON c.id = p.cliente_id
+    WHERE c.activo = 1
+  `;
+  const params = [];
+  if (desde) {
+    query += ` AND ${FECHA_LOCAL_SQL} BETWEEN ? AND ?`;
+    params.push(desde, hoy);
+  }
+  query += " ORDER BY pa.fecha ASC, pa.id ASC";
+
+  const filas = db.prepare(query).all(...params);
+
+  const workbook = new ExcelJS.Workbook();
+  const hoja = workbook.addWorksheet("Pagos");
+  hoja.columns = [
+    { header: "Fecha", key: "fecha", width: 12 },
+    { header: "Hora", key: "hora", width: 10 },
+    { header: "Cliente", key: "cliente", width: 30 },
+    { header: "Cuota #", key: "cuota", width: 10 },
+    { header: "Valor", key: "valor", width: 16 },
+    { header: "Notas", key: "notas", width: 30 },
+  ];
+  hoja.getRow(1).font = { bold: true };
+
+  for (const fila of filas) {
+    // fecha_hora viene en UTC (datetime('now'), formato "YYYY-MM-DD HH:MM:SS"
+    // sin zona) — se convierte a hora de Colombia para que coincida con lo
+    // que el usuario ve en la app.
+    const horaLocal = new Date(fila.fecha_hora.replace(" ", "T") + "Z").toLocaleTimeString(
+      "es-CO",
+      { timeZone: "America/Bogota", hour: "2-digit", minute: "2-digit" }
+    );
+    hoja.addRow({
+      fecha: fila.fecha_local,
+      hora: horaLocal,
+      cliente: fila.cliente_nombre,
+      cuota: fila.cuota_numero,
+      valor: fila.valor,
+      notas: fila.notas || "",
+    });
+  }
+  hoja.getColumn("valor").numFmt = "#,##0.00";
+
+  const nombresPorRango = {
+    dia: `pagos-hoy-${hoy}`,
+    mes: `pagos-mes-${hoy.slice(0, 7)}`,
+    anio: `pagos-anio-${hoy.slice(0, 4)}`,
+    todo: "pagos-historico-completo",
+  };
+  const nombreArchivo = `${nombresPorRango[rango]}.xlsx`;
+
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  res.setHeader("Content-Disposition", `attachment; filename="${nombreArchivo}"`);
+  await workbook.xlsx.write(res);
+  res.end();
 });
 
 // Ranking de clientes en mora (los que más deben en cuotas vencidas), para

@@ -17,6 +17,7 @@
 const DIAS_POR_FRECUENCIA = {
   diario: 1,
   semanal: 7,
+  catorcenal: 14, // cada 14 días exactos (distinto de "quincenal", que son 15)
   quincenal: 15,
   mensual: 30,
 };

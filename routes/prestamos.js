@@ -80,7 +80,7 @@ router.post("/", (req, res) => {
   }
 
   const tipo = ["fijo", "saldo", "capitalizado"].includes(tipo_interes) ? tipo_interes : "fijo";
-  const frec = ["diario", "semanal", "quincenal", "mensual"].includes(frecuencia)
+  const frec = ["diario", "semanal", "catorcenal", "quincenal", "mensual"].includes(frecuencia)
     ? frecuencia
     : "diario";
 

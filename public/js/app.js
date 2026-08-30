@@ -361,6 +361,8 @@ async function renderCurrentView() {
       case "empenos": html = await viewEmpenos(); break;
       case "empeno-detalle": html = await viewEmpenoDetalle(state.params.id); break;
       case "reportes": html = await viewReportes(); break;
+      case "historial-pagos": html = await viewHistorialPagos(); break;
+      case "historial-pagos-dia": html = await viewHistorialPagosDia(state.params.fecha); break;
       case "ajustes": html = await viewAjustes(); break;
       case "rutas": html = await viewRutas(); break;
       default: html = await viewDashboard();
@@ -910,7 +912,7 @@ function prestamoListItem(p) {
     <div class="list-item" onclick="go('prestamo-detalle', {id: ${p.id}})">
       <div class="info">
         <div class="title">${money(p.monto)} · ${p.frecuencia}</div>
-        <div class="subtitle">${p.num_cuotas} cuotas de ${money(p.valor_cuota)} · desde ${fechaCorta(p.fecha_inicio)}</div>
+        <div class="subtitle">${p.num_cuotas === 1 ? `Pago único de ${money(p.valor_cuota)}` : `${p.num_cuotas} cuotas de ${money(p.valor_cuota)}`} · desde ${fechaCorta(p.fecha_inicio)}</div>
       </div>
       <span class="badge ${p.estado}">${p.estado}</span>
     </div>
@@ -956,17 +958,23 @@ async function abrirNuevoPrestamo(clienteIdPreseleccionado) {
       </select>
       <p class="muted" style="font-size:12px;margin:6px 0 0;">En "Fijo" la tasa se cobra una sola vez sobre todo el préstamo (100.000 al 20% = 120.000 en total). En "Sobre saldo" y "Capitalizado" la tasa se cobra en cada cuota sobre el saldo pendiente.</p>
     </div>
+    <div class="field" style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+      <input type="checkbox" id="np-pago-unico" onchange="togglePagoUnico()" style="width:auto;flex-shrink:0;" />
+      <label for="np-pago-unico" style="margin:0;text-transform:none;font-size:14px;font-weight:600;letter-spacing:0;">Pago único (capital + interés juntos, al final, sin cuotas en el camino)</label>
+    </div>
     <div class="row-2">
       <div class="field">
         <label>Frecuencia de pago</label>
         <select id="np-frecuencia">
           <option value="diario">Diario</option>
           <option value="semanal">Semanal</option>
-          <option value="quincenal">Quincenal</option>
+          <option value="catorcenal">Catorcenal (cada 14 días)</option>
+          <option value="quincenal">Quincenal (cada 15 días)</option>
           <option value="mensual">Mensual</option>
         </select>
+        <p id="np-frecuencia-hint" class="muted" style="font-size:12px;margin:6px 0 0;display:none;">Con "Pago único" la frecuencia solo define a cuántos días se vence el pago.</p>
       </div>
-      <div class="field"><label>Número de cuotas *</label><input id="np-cuotas" type="text" inputmode="numeric" oninput="manejarInputMiles(event)" required /></div>
+      <div class="field" id="np-cuotas-wrap"><label>Número de cuotas *</label><input id="np-cuotas" type="text" inputmode="numeric" oninput="manejarInputMiles(event)" required /></div>
     </div>
     <div class="field"><label>Fecha de inicio *</label><input id="np-fecha" type="date" value="${hoyISO()}" required /></div>
     <div class="field"><label>Notas</label><textarea id="np-notas" rows="2"></textarea></div>
@@ -975,13 +983,25 @@ async function abrirNuevoPrestamo(clienteIdPreseleccionado) {
   `);
 }
 
+// "Pago único": oculta el campo de número de cuotas (siempre es 1 sola,
+// capital + interés juntos al final) y muestra la aclaración de que la
+// frecuencia solo sirve para saber a cuántos días vence ese pago.
+function togglePagoUnico() {
+  const marcado = document.getElementById("np-pago-unico").checked;
+  document.getElementById("np-cuotas-wrap").style.display = marcado ? "none" : "";
+  document.getElementById("np-frecuencia-hint").style.display = marcado ? "" : "none";
+}
+
 async function guardarPrestamo() {
   const cliente_id = document.getElementById("np-cliente-id").value;
   const monto = desformatearNumero(document.getElementById("np-monto").value);
   const tasa_interes = desformatearNumero(document.getElementById("np-tasa").value);
   const tipo_interes = document.getElementById("np-tipo").value;
   const frecuencia = document.getElementById("np-frecuencia").value;
-  const num_cuotas = parseInt(desformatearNumero(document.getElementById("np-cuotas").value), 10);
+  const pagoUnico = document.getElementById("np-pago-unico").checked;
+  const num_cuotas = pagoUnico
+    ? 1
+    : parseInt(desformatearNumero(document.getElementById("np-cuotas").value), 10);
   const fecha_inicio = document.getElementById("np-fecha").value;
   const notas = document.getElementById("np-notas").value.trim();
 
@@ -1022,12 +1042,12 @@ async function viewPrestamoDetalle(id) {
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <div>
             <div class="title" style="font-size:17px;font-weight:700;">${escapeHtml(p.cliente.nombre)}</div>
-            <div class="subtitle muted">${money(p.monto)} prestados · ${p.tipo_interes} · ${p.frecuencia}</div>
+            <div class="subtitle muted">${money(p.monto)} prestados · ${p.tipo_interes} · ${p.frecuencia}${p.num_cuotas === 1 ? " · pago único" : ""}</div>
           </div>
           <span class="badge ${p.estado}">${p.estado}</span>
         </div>
         <div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>
-        <div class="subtitle muted" style="margin-top:6px;">${money(totalPagado)} pagados de ${money(p.total_pagar)} (${pagadas}/${p.cuotas.length} cuotas)</div>
+        <div class="subtitle muted" style="margin-top:6px;">${money(totalPagado)} pagados de ${money(p.total_pagar)} ${p.num_cuotas === 1 ? "" : `(${pagadas}/${p.cuotas.length} cuotas)`}</div>
         ${p.estado === "activo" ? `<button class="btn btn-danger btn-sm" style="margin-top:12px;" onclick="cancelarPrestamo(${p.id})">Cancelar préstamo</button>` : ""}
       </div>
 
@@ -1482,20 +1502,50 @@ async function borrarRuta(id) {
 // ---------------------------------------------------------------------
 // REPORTES
 // ---------------------------------------------------------------------
+// Convierte la clave de un bloque de ganancia (que según el período es una
+// fecha exacta, el lunes de una semana, "YYYY-MM" o "YYYY") en una etiqueta
+// legible para el tooltip de la barra.
+function etiquetaPeriodoGanancia(clave, tipo) {
+  if (tipo === "anio") return clave;
+  if (tipo === "mes") {
+    const [y, m] = clave.split("-").map(Number);
+    return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("es-CO", {
+      month: "short",
+      year: "2-digit",
+      timeZone: "UTC",
+    });
+  }
+  if (tipo === "semana") return "semana del " + fechaCorta(clave);
+  return fechaCorta(clave);
+}
+
 async function viewReportes() {
   const rango = parseInt(state.params.rango, 10) || 14;
   const hoy = hoyISO();
   const desde = restarDiasISO(hoy, rango);
   const rangosDisponibles = [7, 14, 30, 90];
 
-  const [resumen, recaudo, enMora, empenosResumen] = await Promise.all([
+  const periodoGanancia = ["dia", "semana", "mes", "anio"].includes(state.params.periodoGanancia)
+    ? state.params.periodoGanancia
+    : "dia";
+  const periodosGanancia = [
+    { key: "dia", label: "Día" },
+    { key: "semana", label: "Semana" },
+    { key: "mes", label: "Mes" },
+    { key: "anio", label: "Año" },
+  ];
+
+  const [resumen, recaudo, enMora, empenosResumen, ganancia] = await Promise.all([
     api("/reportes/resumen"),
     api(`/reportes/recaudo-por-dia?desde=${desde}&hasta=${hoy}`),
     api("/reportes/clientes-en-mora"),
     api("/empenos/reportes/resumen"),
+    api(`/reportes/ganancia-por-periodo?periodo=${periodoGanancia}`),
   ]);
 
   const max = Math.max(1, ...recaudo.map((d) => d.total));
+  const maxGanancia = Math.max(1, ...ganancia.map((d) => d.ganancia));
+  const totalGanancia = ganancia.reduce((s, d) => s + d.ganancia, 0);
 
   return `
     ${topbar("Reportes")}
@@ -1507,14 +1557,28 @@ async function viewReportes() {
         <div class="stat-card"><div class="label">Ganancia proyectada</div><div class="value">${money(resumen.gananciaProyectada)}</div></div>
       </div>
 
-      <div class="section-title"><span>Recaudo</span></div>
+      <div class="section-title">
+        <span>Recaudo</span>
+        <span onclick="go('historial-pagos')" style="font-size:12.5px;font-weight:600;color:var(--gold);cursor:pointer;">Ver historial ›</span>
+      </div>
       <div class="range-selector">
-        ${rangosDisponibles.map((r) => `<button class="range-chip ${rango === r ? "active" : ""}" onclick="go('reportes', {rango: ${r}})">${r}d</button>`).join("")}
+        ${rangosDisponibles.map((r) => `<button class="range-chip ${rango === r ? "active" : ""}" onclick="go('reportes', {rango: ${r}, periodoGanancia: '${periodoGanancia}'})">${r}d</button>`).join("")}
       </div>
       <div class="card">
         <div class="bar-chart">
           ${recaudo.map((d) => `<div class="bar" title="${d.dia}: ${money(d.total)}"><div class="fill" style="height:${Math.max(4, (d.total / max) * 100)}%"></div></div>`).join("") || `<span class="muted">Sin datos todavía en este rango</span>`}
         </div>
+      </div>
+
+      <div class="section-title"><span>Ganancia real (ya cobrada)</span></div>
+      <div class="range-selector">
+        ${periodosGanancia.map((p) => `<button class="range-chip ${periodoGanancia === p.key ? "active" : ""}" onclick="go('reportes', {rango: ${rango}, periodoGanancia: '${p.key}'})">${p.label}</button>`).join("")}
+      </div>
+      <div class="card">
+        <div class="bar-chart">
+          ${ganancia.map((d) => `<div class="bar" title="${etiquetaPeriodoGanancia(d.periodo, periodoGanancia)}: ${money(d.ganancia)}"><div class="fill" style="height:${Math.max(4, (d.ganancia / maxGanancia) * 100)}%"></div></div>`).join("") || `<span class="muted">Sin ganancia registrada todavía en este rango</span>`}
+        </div>
+        <div class="subtitle muted" style="margin-top:10px;text-align:right;">Total del rango: <b>${money(totalGanancia)}</b></div>
       </div>
 
       <div class="section-title"><span>Clientes en mora</span></div>
@@ -1557,6 +1621,108 @@ async function viewReportes() {
 }
 
 // ---------------------------------------------------------------------
+// HISTORIAL DE PAGOS (por día, solo préstamos)
+// ---------------------------------------------------------------------
+
+// Formatea una hora ISO/"YYYY-MM-DD HH:MM:SS" (UTC) a la hora de Colombia,
+// para mostrar a qué hora del día se hizo cada pago.
+function horaCorta(fecha) {
+  if (!fecha) return "-";
+  let iso = fecha;
+  if (!iso.includes("T")) {
+    iso = iso.includes(" ") ? iso.replace(" ", "T") + "Z" : iso + "T00:00:00Z";
+  }
+  return new Date(iso).toLocaleTimeString("es-CO", {
+    timeZone: "America/Bogota",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+// Cambia solo el rango de días del historial (sin contar como una
+// "pantalla nueva" para el botón de volver — si no, cada clic en 7d/30d/90d
+// se apilaría en el historial y "atrás" habría que presionarlo varias
+// veces para realmente salir de esta pantalla).
+function cambiarRangoHistorialPagos(rango) {
+  state.params = { ...state.params, rango };
+  renderCurrentView();
+}
+
+async function viewHistorialPagos() {
+  const rango = parseInt(state.params.rango, 10) || 30;
+  const hoy = hoyISO();
+  const desde = restarDiasISO(hoy, rango);
+  const rangosDisponibles = [7, 30, 90, 365];
+
+  const dias = await api(`/reportes/recaudo-por-dia?desde=${desde}&hasta=${hoy}`);
+  const diasOrdenados = [...dias].sort((a, b) => (a.dia < b.dia ? 1 : -1));
+
+  return `
+    ${topbar("Historial de pagos")}
+    <main class="view">
+      <p class="muted" style="font-size:12.5px;margin-top:0;">Solo pagos de préstamos (los empeños son un negocio aparte). Toca un día para ver el detalle.</p>
+      <div class="range-selector">
+        ${rangosDisponibles.map((r) => `<button class="range-chip ${rango === r ? "active" : ""}" onclick="cambiarRangoHistorialPagos(${r})">${r}d</button>`).join("")}
+      </div>
+      ${
+        diasOrdenados.length === 0
+          ? `<div class="empty-state"><div class="icon">🗓️</div><p>No hay pagos registrados en este rango</p></div>`
+          : diasOrdenados
+              .map(
+                (d) => `
+            <div class="list-item" onclick="go('historial-pagos-dia', {fecha: '${d.dia}'})">
+              <div class="info">
+                <div class="title">${fechaCorta(d.dia)}</div>
+                <div class="subtitle">${d.cantidad} pago${d.cantidad === 1 ? "" : "s"}</div>
+              </div>
+              <div class="amount ok">${money(d.total)}</div>
+            </div>
+          `
+              )
+              .join("")
+      }
+    </main>
+  `;
+}
+
+async function viewHistorialPagosDia(fecha) {
+  const pagos = await api(`/reportes/pagos-del-dia/${fecha}`);
+  const total = pagos.reduce((s, p) => s + p.valor, 0);
+
+  return `
+    ${topbar(fechaCorta(fecha))}
+    <main class="view">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;"><span class="muted">Total del día</span><b>${money(total)}</b></div>
+        <div style="display:flex;justify-content:space-between;padding-top:4px;"><span class="muted">Pagos</span><b>${pagos.length}</b></div>
+      </div>
+      <div class="section-title"><span>Pagos</span></div>
+      ${
+        pagos.length === 0
+          ? `<p class="muted">No hay pagos registrados este día</p>`
+          : pagos
+              .map(
+                (pg) => `
+            <div class="list-item" onclick="go('cliente-detalle', {id: ${pg.cliente_id}})">
+              <div class="avatar">${escapeHtml(iniciales(pg.cliente_nombre))}</div>
+              <div class="info">
+                <div class="title">${escapeHtml(pg.cliente_nombre)}</div>
+                <div class="subtitle">Cuota #${pg.cuota_numero} · ${horaCorta(pg.fecha)}${pg.notas ? " · " + escapeHtml(pg.notas) : ""}</div>
+              </div>
+              <div style="text-align:right;" onclick="event.stopPropagation()">
+                <div class="amount ok">${money(pg.valor)}</div>
+                <button class="btn-edit-fecha" title="Deshacer pago" onclick="deshacerPago(${pg.id})">↩️</button>
+              </div>
+            </div>
+          `
+              )
+              .join("")
+      }
+    </main>
+  `;
+}
+
+// ---------------------------------------------------------------------
 // AJUSTES
 // ---------------------------------------------------------------------
 async function viewAjustes() {
@@ -1586,6 +1752,16 @@ async function viewAjustes() {
       <div class="card">
         <p class="muted" style="margin-top:0;">Cada día se envía automáticamente una copia completa de tus datos por correo. También puedes enviarla ahora mismo:</p>
         <button class="btn btn-secondary btn-block" onclick="enviarBackupAhora()">Enviar copia de seguridad ahora</button>
+        <p class="muted" style="margin:16px 0 10px;">O descarga un Excel con los pagos de préstamos, para tener tu propia copia (solo lectura, no reemplaza el backup de arriba):</p>
+        <div id="exportar-excel-resultado"></div>
+        <div class="row-2">
+          <button class="btn btn-secondary" onclick="descargarExcelPagos('dia')">Pagos de hoy</button>
+          <button class="btn btn-secondary" onclick="descargarExcelPagos('mes')">Pagos del mes</button>
+        </div>
+        <div class="row-2" style="margin-top:10px;">
+          <button class="btn btn-secondary" onclick="descargarExcelPagos('anio')">Pagos del año</button>
+          <button class="btn btn-secondary" onclick="descargarExcelPagos('todo')">Todo completo</button>
+        </div>
       </div>
 
       <div class="section-title"><span>Importar datos</span></div>
@@ -1714,6 +1890,48 @@ async function enviarBackupAhora() {
     else toast("No se pudo enviar: " + (r.motivo || "revisa la configuración de correo"), "error");
   } catch (e) {
     toast(e.message, "error");
+  }
+}
+
+// Descarga un Excel con los pagos de préstamos del rango elegido. Se pide
+// con fetch (en vez de un simple <a href>) para poder mostrar un error
+// legible si algo falla, y para que funcione igual de bien dentro de la
+// app instalada en el celular.
+async function descargarExcelPagos(rango) {
+  const resultadoEl = document.getElementById("exportar-excel-resultado");
+  if (resultadoEl) resultadoEl.innerHTML = "";
+  toast("Generando Excel...");
+  try {
+    const resp = await fetch(`/api/reportes/exportar-pagos?rango=${rango}`, {
+      credentials: "include",
+    });
+    if (!resp.ok) {
+      let mensaje = "No se pudo generar el archivo";
+      try {
+        const data = await resp.json();
+        if (data && data.error) mensaje = data.error;
+      } catch (e) {
+        /* la respuesta de error no era JSON, se usa el mensaje genérico */
+      }
+      throw new Error(mensaje);
+    }
+    const blob = await resp.blob();
+    const cabecera = resp.headers.get("Content-Disposition") || "";
+    const coincidencia = cabecera.match(/filename="(.+)"/);
+    const nombreArchivo = coincidencia ? coincidencia[1] : "pagos.xlsx";
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nombreArchivo;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast("Excel descargado", "success");
+  } catch (e) {
+    toast(e.message, "error");
+    if (resultadoEl) resultadoEl.innerHTML = `<div class="error-msg">${e.message}</div>`;
   }
 }
 
